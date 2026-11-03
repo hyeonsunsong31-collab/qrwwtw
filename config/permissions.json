@@ -1,0 +1,33 @@
+{
+  "_comment": "Permission policy for agentic PC control (requirement 20). Each category is allow | ask | deny. 'ask' prompts the user in the overlay before the action runs. Destructive, irreversible, or outbound-data actions default to 'ask' even inside an 'allow' category. Every action is written to the audit log regardless. Edit this file to widen or restrict JARVIS. See docs/SECURITY.md.",
+  "default": "ask",
+  "categories": {
+    "read_files": "allow",
+    "write_files": "ask",
+    "delete_files": "ask",
+    "launch_apps": "allow",
+    "control_apps": "ask",
+    "read_system_info": "allow",
+    "change_system_settings": "ask",
+    "browser_open": "allow",
+    "browser_navigate": "allow",
+    "browser_read": "allow",
+    "browser_form_fill": "ask",
+    "media_control": "allow",
+    "play_music": "allow",
+    "read_devices": "allow",
+    "control_devices": "ask",
+    "read_accounts": "ask",
+    "network_send": "ask",
+    "run_shell": "ask",
+    "run_shell_elevated": "deny"
+  },
+  "always_ask_keywords": ["password", "credential", "secret", "token", "bank", "payment", "wallet", "format", "registry delete", "diskpart"],
+  "never_allowed": [
+    "Actions that target computers other than this one",
+    "Hiding JARVIS from the user or from the OS (no stealth / no anti-detection)",
+    "Disabling the audit log",
+    "Exfiltrating files or credentials to third parties without an explicit per-action confirmation"
+  ],
+  "audit_log": "data/audit/audit.log"
+}

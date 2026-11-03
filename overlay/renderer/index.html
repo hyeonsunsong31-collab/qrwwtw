@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JARVIS</title>
+  <link rel="stylesheet" href="hologram.css" />
+  <!-- Offline-friendly: Three.js is resolved from node_modules via this import map
+       (populated by `npm install`, run by the installer). -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../../node_modules/three/build/three.module.js",
+      "three/addons/": "../../node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- Root HUD: transparent + click-through; interactive widgets re-enable the pointer. -->
+  <div id="hud">
+
+    <!-- Live 3D project space (hidden until opened). Replaces the desktop when open. -->
+    <div id="space3d-container" class="hidden" aria-label="3D project space"></div>
+
+    <!-- Scanline / vignette holographic ambience -->
+    <div id="ambience" aria-hidden="true"></div>
+
+    <!-- Top-left: identity + connection + neural readout -->
+    <header id="hud-top" class="panel interactive">
+      <div class="brand"><span class="brand-main">J.A.R.V.I.S</span>
+        <span class="brand-sub" data-i18n="tagline">Just A Rather Very Intelligent System</span></div>
+      <div class="meters">
+        <span id="conn-dot" class="dot" title="connection"></span>
+        <span id="neural-readout" class="neural">neural mesh · —</span>
+        <span id="lang-badge" class="badge">EN</span>
+      </div>
+    </header>
+
+    <!-- Center state ring: idle / listening / thinking / speaking -->
+    <div id="state-ring" class="interactive" data-state="idle" title="JARVIS">
+      <svg viewBox="0 0 120 120" class="ring">
+        <circle class="ring-bg" cx="60" cy="60" r="52" />
+        <circle class="ring-fg" cx="60" cy="60" r="52" />
+        <circle class="ring-core" cx="60" cy="60" r="20" />
+      </svg>
+      <div id="state-label" data-i18n="state_idle">standby</div>
+    </div>
+
+    <!-- Chat box hologram (requirement 6) -->
+    <section id="chat-panel" class="panel interactive hidden">
+      <div id="chat-head">
+        <span data-i18n="chat_title">Conversation</span>
+        <button id="chat-close" class="x" title="close">×</button>
+      </div>
+      <div id="transcript" role="log" aria-live="polite"></div>
+      <div id="options-bar"></div>
+      <form id="chat-form">
+        <button type="button" id="btn-listen" class="mic" title="hold to speak" data-i18n-title="listen">🎙</button>
+        <input id="chat-input" type="text" autocomplete="off"
+               data-i18n-ph="chat_ph" placeholder="Type or speak a command, sir…" />
+        <button type="submit" id="chat-send" data-i18n="send">Send</button>
+      </form>
+    </section>
+
+    <!-- Microphone mutes for BOTH sides (requirement 6) -->
+    <div id="mic-dock" class="interactive">
+      <button id="mute-user" class="holo-btn" title="mute your microphone">
+        <span class="ic">🎤</span><span class="lbl" data-i18n="mic_user">You</span></button>
+      <button id="mute-ai" class="holo-btn" title="mute JARVIS listening">
+        <span class="ic">👂</span><span class="lbl" data-i18n="mic_ai">JARVIS</span></button>
+    </div>
+
+    <!-- Feature dock: a button for EVERY capability (requirement 6; shown in 3D mode or when expanded) -->
+    <nav id="feature-dock" class="panel interactive hidden" aria-label="features"></nav>
+
+    <!-- Always-visible emergency wake button (requirements 9, 10) -->
+    <button id="reactor" class="interactive" title="Wake JARVIS (Ctrl+Alt+J)" aria-label="wake">
+      <svg viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="46" class="r-outer" />
+        <circle cx="50" cy="50" r="34" class="r-mid" />
+        <g class="r-tri"><polygon points="50,24 72,64 28,64" /></g>
+        <circle cx="50" cy="50" r="12" class="r-core" />
+      </svg>
+      <span class="reactor-label" data-i18n="wake_btn">WAKE</span>
+    </button>
+
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

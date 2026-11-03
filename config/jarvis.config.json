@@ -1,0 +1,92 @@
+{
+  "identity": {
+    "name": "JARVIS",
+    "persona": "A refined British gentleman's valet in the spirit of a classic butler: courteous, witty, concise, unflappable. Addresses the user as 'sir' unless told otherwise.",
+    "wake_phrase": "wake up jarvis",
+    "wake_response": "Jarvis at your service sir"
+  },
+  "language": {
+    "default": "en",
+    "auto_switch": true,
+    "supported": ["en", "ko"],
+    "notes": "Default language is English. When the user's input is detected in another supported language, I/O switches to that language automatically (requirement 2). The signature voice is British English."
+  },
+  "voice": {
+    "enabled": true,
+    "tts": {
+      "engine": "piper",
+      "voice_en": "en_GB-alan-medium",
+      "voice_ko": "ko_KR-glow",
+      "fallback_engine": "sapi5",
+      "fallback_voice_en": "Microsoft George Desktop",
+      "rate": 1.0,
+      "accent": "en-GB-male",
+      "notes": "British gentleman voice (requirement 21). Piper runs fully offline; SAPI5 George is the Windows built-in British male fallback."
+    },
+    "stt": {
+      "engine": "faster-whisper",
+      "model": "auto",
+      "vad": true,
+      "language": "auto"
+    },
+    "wakeword": {
+      "engine": "openwakeword",
+      "phrase": "wake up jarvis",
+      "model": "models/wake_up_jarvis.onnx",
+      "sensitivity": 0.6,
+      "fallback": "vosk-grammar"
+    },
+    "barge_in": {
+      "enabled": true,
+      "notes": "User may interrupt spoken replies at any time; speech during TTS stops playback and starts a new command (requirement 13)."
+    }
+  },
+  "llm": {
+    "provider": "ollama",
+    "host": "http://127.0.0.1:11434",
+    "model": "auto",
+    "model_candidates": {
+      "high": "qwen2.5:14b-instruct",
+      "medium": "llama3.1:8b-instruct-q4_K_M",
+      "low": "qwen2.5:3b-instruct"
+    },
+    "temperature": 0.7,
+    "context_tokens": 8192,
+    "system_prompt_file": "agent/prompts/system_en.txt"
+  },
+  "neural_core": {
+    "enabled": true,
+    "nominal_neurons": 200000000000,
+    "active_neurons": "auto",
+    "active_neurons_bounds": [20000, 2000000],
+    "synapse_plasticity": true,
+    "modules": ["cortex", "cerebellum", "thalamus", "brainstem", "hippocampus", "basal_ganglia"],
+    "notes": "nominal_neurons is the documented design scale (requirement 1). active_neurons is what actually instantiates, bounded by detected RAM. The mesh runs as a control/modulation layer over the LLM output."
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "protocol": "ws"
+  },
+  "overlay": {
+    "always_on_top": true,
+    "emergency_wake_button": true,
+    "theme": "jarvis-hologram",
+    "global_hotkey": "Control+Alt+J",
+    "multi_monitor": true
+  },
+  "space3d": {
+    "gesture_control": true,
+    "gesture_toggle_hotkey": "Control+Alt+G",
+    "replace_wallpaper": true
+  },
+  "music": {
+    "backend": "yt-dlp+mpv",
+    "web_player_fallback": "https://music.youtube.com/search?q="
+  },
+  "startup": {
+    "autostart_on_boot": true,
+    "run_in_background": true,
+    "method": "windows-task-scheduler-logon"
+  }
+}

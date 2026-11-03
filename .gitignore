@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node / Electron
+node_modules/
+dist/
+out/
+
+# JARVIS runtime data (logs, recordings, generated files, checkpoints)
+data/*
+!data/.gitkeep
+
+# Downloaded models / voices (fetched by installer on the user's PC)
+models/*.onnx
+models/*.bin
+voices/*.onnx
+voices/*.onnx.json
+*.gguf
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets (never commit)
+config/secrets.json
+.env

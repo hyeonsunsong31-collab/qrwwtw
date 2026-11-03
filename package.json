@@ -1,0 +1,19 @@
+{
+  "name": "jarvis-overlay",
+  "version": "1.0.0",
+  "description": "JARVIS holographic overlay + 3D modelling space (Electron + Three.js)",
+  "main": "overlay/main.js",
+  "scripts": {
+    "start": "electron .",
+    "lint": "node --check overlay/main.js && node --check overlay/preload.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "33.2.1"
+  },
+  "dependencies": {
+    "three": "0.171.0",
+    "ws": "8.18.0"
+  }
+}

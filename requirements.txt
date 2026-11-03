@@ -1,0 +1,48 @@
+# JARVIS Python backend dependencies (Windows 10/11, Python 3.11)
+# Install via INSTALL_JARVIS.bat / scripts/setup_windows.ps1
+
+# --- core server / async ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.1
+pydantic==2.10.4
+httpx==0.28.1
+
+# --- neural core ---
+numpy==2.2.1
+scipy==1.15.1
+
+# --- NLU / language ---
+langdetect==1.0.9
+
+# --- voice: STT / wake / VAD ---
+faster-whisper==1.1.1
+openwakeword==0.6.0
+sounddevice==0.5.1
+webrtcvad==2.0.10
+numpy-ringbuffer==0.2.2
+
+# --- voice: TTS ---
+piper-tts==1.2.0
+pyttsx3==2.98            ; sys_platform == "win32"   # SAPI5 fallback (British 'George')
+
+# --- PC control / agent skills (Windows) ---
+psutil==6.1.1
+pyautogui==0.9.54
+pygetwindow==0.0.9       ; sys_platform == "win32"
+pywinauto==0.6.9         ; sys_platform == "win32"
+pycaw==20240210          ; sys_platform == "win32"   # system/app volume + mic mute
+comtypes==1.4.8          ; sys_platform == "win32"
+
+# --- browser control ---
+playwright==1.49.1
+
+# --- music ---
+yt-dlp==2024.12.23
+
+# --- tray / supervisor ---
+pystray==0.19.5
+Pillow==11.1.0
+
+# NOTE: Ollama (the local LLM runtime) is a native app, not a pip package.
+# The installer downloads it from https://ollama.com and pulls the model.
