@@ -48,7 +48,8 @@ def check_imports():
     head("Module imports")
     mods = ["core.synaptic_perceptron", "core.brain_mesh", "core.control_layer", "core.scale",
             "recorder.recorder", "agent.nlu", "agent.permissions", "agent.llm_ollama",
-            "agent.orchestrator", "agent.skills", "voice.wakeword", "voice.stt", "voice.tts",
+            "agent.settings", "agent.replies_ko", "agent.orchestrator", "agent.skills",
+            "agent.skills.windows", "agent.server", "voice.wakeword", "voice.stt", "voice.tts",
             "voice.interrupt", "voice.engine", "boot.jarvis_service"]
     good = True
     for m in mods:
@@ -94,11 +95,13 @@ def check_optional():
     powers = {
         "numpy": "neural core (required)", "scipy": "neural core extras",
         "fastapi": "command-bus server", "uvicorn": "command-bus server", "httpx": "Ollama client",
-        "faster_whisper": "speech-to-text", "openwakeword": "wake word 'wake up Jarvis'",
+        "faster_whisper": "speech-to-text", "vosk": "exact wake phrase 'wake up Jarvis'",
+        "openwakeword": "optional neural wake word",
         "sounddevice": "microphone/audio I/O", "piper": "British TTS voice",
         "pyttsx3": "SAPI5 British voice fallback", "webrtcvad": "barge-in / voice interrupt",
         "psutil": "system info + model sizing", "yt_dlp": "web music playback",
-        "playwright": "browser page reading", "pyautogui": "app/system automation",
+        "playwright": "browser page reading", "pyautogui": "typing / hotkeys / screenshots",
+        "winrt": "Windows OneCore voices (Korean, British fallback)",
         "pystray": "tray icon", "PIL": "tray icon",
     }
     for mod, what in powers.items():

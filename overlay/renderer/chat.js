@@ -1,10 +1,12 @@
-/* chat.js — holographic chat box (requirements 3, 6, 13).
- * Text input + a push-to-talk mic (browser SpeechRecognition) that both feed the same
- * command bus, so every feature is reachable by text or voice from the overlay too. */
+/* chat.js -- holographic chat box (requirements 3, 6, 13).
+ * Text input plus a mic button. The mic asks the backend's Whisper engine to listen
+ * (push-to-talk); only if the backend has no microphone does it fall back to the browser's
+ * speech recognition. Streamed replies grow in place, so text appears as JARVIS speaks. */
 import { bus } from "./bus.js";
-import { t, getLang } from "./i18n.js";
+import { getLang } from "./i18n.js";
 
 let panel, transcript, input, optionsBar, listenBtn, recog, listening = false;
+const live = new Map();   // msg_id -> bubble element being streamed
 
 export function initChat() {
   panel = document.getElementById("chat-panel");
@@ -15,26 +17,45 @@ export function initChat() {
 
   document.getElementById("chat-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const text = input.value.trim();
+    let text = input.value.trim();
     if (!text) return;
-    bus.interrupt();          // a new typed command cuts off any current reply (req 13)
-    bus.command(text, "text");
+    if (input.dataset.suffix && !text.endsWith(input.dataset.suffix.trim())) text += input.dataset.suffix;
+    input.dataset.suffix = "";
+    bus.command(text, "text");      // a new command interrupts any current reply (req 13)
     input.value = "";
   });
   document.getElementById("chat-close").addEventListener("click", hide);
-  listenBtn.addEventListener("click", toggleListen);
+  listenBtn.addEventListener("click", () => { listenBtn.classList.add("live"); bus.listen(); });
 
-  return { addMessage, setOptions, show, hide, toggle, focus: () => input && input.focus() };
+  return { addMessage, stream, finalize, setOptions, show, hide, toggle, browserListen,
+           setListening: (on) => listenBtn.classList.toggle("live", !!on),
+           focus: () => input && input.focus() };
 }
 
-function addMessage(role, text) {
-  if (!transcript) return;
+function bubble(role, text) {
   const el = document.createElement("div");
   el.className = "msg " + (role === "user" ? "user" : "assistant");
   el.textContent = text;
   transcript.appendChild(el);
   transcript.scrollTop = transcript.scrollHeight;
   show();
+  return el;
+}
+
+function addMessage(role, text) { if (transcript) bubble(role, text); }
+
+function stream(id, text) {
+  if (!transcript || !id) return;
+  let el = live.get(id);
+  if (!el) { el = bubble("assistant", ""); el.classList.add("streaming"); live.set(id, el); }
+  el.textContent = text;
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+function finalize(id, text) {
+  const el = id && live.get(id);
+  if (el) { el.textContent = text; el.classList.remove("streaming"); live.delete(id); }
+  else addMessage("assistant", text);
 }
 
 function setOptions(options = [], suggestions = []) {
@@ -50,38 +71,26 @@ function chip(label, isSug) {
   c.textContent = label;
   c.title = isSug ? "suggestion" : "option";
   c.addEventListener("click", () => {
-    // suggestions are advice; options are actionable — send options straight to the bus
     if (isSug) { input.value = label.replace(/, sir\.?$/i, ""); input.focus(); }
-    else { bus.interrupt(); bus.command(label, "text"); }
+    else bus.command(label, "text");
   });
   return c;
 }
 
-/* --- browser speech-to-text (push to talk) --- */
-function ensureRecog() {
+/* Fallback only: the browser's recognizer (used when the backend has no microphone). */
+function browserListen() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return null;
-  if (recog) return recog;
-  recog = new SR();
-  recog.continuous = false;
-  recog.interimResults = false;
-  recog.onresult = (ev) => {
-    const text = ev.results[0][0].transcript.trim();
-    if (text) { bus.interrupt(); bus.command(text, "voice"); }
-  };
-  recog.onend = () => { listening = false; listenBtn.classList.remove("live"); };
-  recog.onerror = () => { listening = false; listenBtn.classList.remove("live"); };
-  return recog;
-}
-
-function toggleListen() {
-  const r = ensureRecog();
-  if (!r) { input.placeholder = "Voice input needs the backend mic, sir — type instead."; return; }
-  if (listening) { r.stop(); return; }
-  try {
-    r.lang = getLang() === "ko" ? "ko-KR" : "en-GB";
-    r.start(); listening = true; listenBtn.classList.add("live");
-  } catch (e) { /* already started */ }
+  listenBtn.classList.remove("live");
+  if (!SR) { input.placeholder = "No microphone available to JARVIS - please type, sir."; return; }
+  if (!recog) {
+    recog = new SR();
+    recog.continuous = false; recog.interimResults = false;
+    recog.onresult = (ev) => { const t = ev.results[0][0].transcript.trim(); if (t) bus.command(t, "voice"); };
+    recog.onend = recog.onerror = () => { listening = false; listenBtn.classList.remove("live"); };
+  }
+  if (listening) { recog.stop(); return; }
+  try { recog.lang = getLang() === "ko" ? "ko-KR" : "en-GB"; recog.start(); listening = true;
+        listenBtn.classList.add("live"); } catch (e) {}
 }
 
 function show() { panel && panel.classList.remove("hidden"); }

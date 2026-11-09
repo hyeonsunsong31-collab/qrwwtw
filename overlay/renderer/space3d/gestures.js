@@ -9,16 +9,20 @@
  * voice command turn camera detection off (requirement 5). If MediaPipe, the model, or the
  * camera is unavailable, it degrades silently and mouse control still works.
  */
+// Local paths are resolved against the PAGE (overlay/renderer/index.html), so they point at
+// the repo's node_modules/ and models/ (installed offline by the setup script). A dynamic
+// import() would otherwise resolve relative to this module's own folder.
+const local = (p) => new URL(p, document.baseURI).href;
 const WASM_PATHS = [
-  "../../node_modules/@mediapipe/tasks-vision/wasm",
+  local("../../node_modules/@mediapipe/tasks-vision/wasm"),
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm",
 ];
 const MODEL_PATHS = [
-  "../../models/hand_landmarker.task",
+  local("../../models/hand_landmarker.task"),
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
 ];
 const VISION_BUNDLES = [
-  "../../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs",
+  local("../../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs"),
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs",
 ];
 

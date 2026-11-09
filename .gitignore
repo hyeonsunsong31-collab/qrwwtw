@@ -14,11 +14,10 @@ out/
 data/*
 !data/.gitkeep
 
-# Downloaded models / voices (fetched by installer on the user's PC)
-models/*.onnx
-models/*.bin
-voices/*.onnx
-voices/*.onnx.json
+# Downloaded by the installer on the user's PC (models, voices, FFmpeg) -- can be gigabytes
+models/
+voices/
+tools/
 *.gguf
 
 # OS

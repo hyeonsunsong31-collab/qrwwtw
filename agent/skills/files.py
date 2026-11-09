@@ -59,7 +59,8 @@ def write_file(path: str, content: str = "") -> dict:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-        return ok(f"I've written {p.name}, sir.", {"path": str(p), "bytes": len(content.encode())})
+        return ok(f"I've written {p.name}, sir.", {"path": str(p), "bytes": len(content.encode()),
+                                                     "generated_files": [str(p)]})
     except OSError as e:
         return fail(f"I couldn't write {path}, sir.", str(e))
 

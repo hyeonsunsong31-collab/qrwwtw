@@ -1,38 +1,51 @@
 # 보안 · 동의 모델
 
-JARVIS는 요구사항 20("PC의 모든 기능과 정보에 전면 접근")을 구현하지만, **사용자 본인의 PC에서,
-본인의 동의 하에, 화면에 보이게 동작하는 개인 비서**라는 원칙을 지킵니다. 숨기거나, 탐지를 회피하거나,
-다른 사람의 기기를 대상으로 하는 기능은 넣지 않았습니다. (오히려 항상 화면에 떠 있는 가시적 비서입니다.)
+JARVIS는 요구사항 20("PC의 모든 기능과 정보에 전면 접근")을 구현하지만, **사용자 본인의 PC에서, 본인의 동의 하에,
+화면에 보이게 동작하는 개인 비서**라는 원칙을 지킵니다. 숨기거나, 탐지를 회피하거나, 다른 사람의 기기를 대상으로 하는
+기능은 없습니다.
 
-## 권한 계층 — `config/permissions.json`
-각 동작 범주는 `allow`(바로 실행) / `ask`(먼저 확인) / `deny`(거부) 중 하나입니다.
+## 1. 명령 버스 접근 제어 (v1.1)
+- 서버(`agent/server.py`)는 **127.0.0.1에만** 바인딩합니다(설정에 다른 주소가 있어도 거부하고 루프백 사용).
+- 시작할 때마다 **새 무작위 토큰**을 `data/session.token`(현재 사용자 전용)에 씁니다. 모든 WebSocket 접속과
+  `/status` `/neural/points` `/history` HTTP 요청은 이 토큰이 있어야 합니다. 공개 엔드포인트는 `{"ok": true}`만 돌려주는
+  `/health`(슈퍼바이저 감시용) 하나입니다.
+- 브라우저에서 열린 웹페이지는 접근할 수 없습니다. 웹페이지는 토큰 파일을 읽을 수 없고, http(s) Origin을 단 WebSocket
+  핸드셰이크는 토큰과 무관하게 거부됩니다. 거부된 시도는 감사 로그에 `ws_connect / rejected`로 남습니다.
+- Electron 오버레이는 preload 브리지를 통해 토큰을 읽고, 백엔드가 재시작되면 재접속할 때 새 토큰을 다시 읽습니다.
 
+## 2. 권한 계층 — `config/permissions.json` (설정 패널에서도 변경 가능)
 | 범주 | 기본값 | 설명 |
 |------|--------|------|
-| read_files / read_system_info / read_devices | allow | 읽기 |
-| launch_apps / browser_open / browser_navigate / media_control / play_music | allow | 저위험 실행 |
-| write_files / control_apps / change_system_settings / control_devices / browser_form_fill / read_accounts | ask | 실행 전 홀로그램 창으로 확인 |
-| delete_files / run_shell / network_send | ask | 되돌리기 어렵거나 외부전송 — 반드시 확인 |
-| run_shell_elevated | **deny** | 관리자 셸은 기본 거부 |
+| read_files · read_system_info · read_devices | allow | 읽기 |
+| launch_apps · browser_open · browser_navigate · media_control · play_music | allow | 저위험 실행 |
+| jarvis_data | allow | JARVIS 자체 폴더에 저장(3D 프로젝트·모델 내보내기) |
+| window_control | allow | 창 전환·최소화·최대화·배경화면 모드(되돌릴 수 있음) |
+| screen_capture | allow | 스크린샷(로컬 저장) |
+| write_files · control_apps · change_system_settings · control_devices · browser_form_fill · read_accounts | ask | 실행 전 홀로그램 확인 |
+| keyboard_input | ask | 포커스된 앱에 입력·단축키(무엇이든 할 수 있으므로 확인) |
+| delete_files · run_shell · network_send | ask | 되돌리기 어렵거나 외부 전송 |
+| run_shell_elevated | **deny** | 관리자 셸 — 설정 패널에서도 **잠김** |
 
-추가 규칙:
-- `always_ask_keywords`(password, credential, bank, format, registry delete 등)가 명령에 들어가면
-  `allow` 범주라도 **강제로 확인**합니다.
-- `never_allowed`: 타 기기 대상 동작, 자기 은폐/탐지회피, 감사 로그 비활성화, 동의 없는 파일/자격증명 외부전송.
+추가 규칙: `always_ask_keywords`(password, credential, bank, format 등)가 명령에 있으면 `allow` 범주도 강제로 확인합니다.
+확인은 홀로그램 대화상자(허용/거부)로 하고, 90초 내 응답이 없으면 거부합니다. 위험도는 신경 제어 계층의 주의(caution)
+신호에도 반영되어 답변이 더 신중해집니다. 설정 패널의 변경은 키·값을 서버가 검증한 뒤 원자적으로 저장하며, LLM이 권한을
+바꾸는 도구는 없습니다.
 
-구현: `agent/permissions.py`의 `PermissionManager.check()`가 결정하고, 확인이 필요하면 오버레이가
-홀로그램 확인 창(허용/거부, `overlay/renderer/app.js` `permissionToast`)을 띄우며, 서버가 응답을 기다립니다
-(90초 내 무응답 시 자동 거부). 위험도는 `control_layer`의 주의(caution) 신호에도 반영되어 답변이 더 신중해집니다.
+## 3. 감사 로그 · 기록
+모든 권한 판단(allow/ask/granted/denied/deny), 거부된 접속, 설정 변경이 `data/audit/audit.log`에 남습니다. 작업·명령·생성
+파일·대화·설명·옵션·추천·체크포인트도 `data/` 아래에 전부 기록됩니다(요구 2).
 
-## 감사 로그
-모든 권한 판단(allow/ask/granted/denied/deny)이 `data/audit/audit.log`에 남습니다. 작업·명령·결과·대화도
-`data/` 아래에 전부 기록됩니다(요구 2). 사용자는 언제든 열람할 수 있습니다.
+## 4. 마이크 · 카메라
+- "JARVIS" 음소거 버튼은 마이크 스트림을 **완전히 닫습니다**(Windows 개인정보 표시도 꺼짐).
+- 웹캠은 손동작 감지를 켠 동안에만 열리고, 끄면 즉시 정지합니다.
 
-## 데이터와 프라이버시
-- 두뇌(LLM)는 **로컬 Ollama**로 완전 오프라인입니다. 대화·파일 내용이 외부로 전송되지 않습니다.
-- 예외: 사용자가 명시적으로 요청한 **웹 음악 재생·웹 검색·페이지 읽기**는 해당 사이트로 나갑니다(일반 브라우징과 동일).
-- 자격증명·토큰은 수집·저장하지 않습니다. `config/secrets.json`과 `.env`는 `.gitignore`로 커밋 차단됩니다.
+## 5. 데이터와 프라이버시
+- 두뇌(LLM)·음성 인식·음성 합성은 모두 **로컬·오프라인**입니다. 대화·파일 내용이 외부로 전송되지 않습니다.
+- 예외: 사용자가 요청한 **웹 음악·웹 검색·페이지 읽기**는 해당 사이트로 나갑니다(일반 브라우징과 동일). 설치 중에는
+  모델·음성 다운로드를 위해 공식 배포처(python.org, nodejs.org, ollama.com, huggingface.co, alphacephei.com, gyan.dev,
+  storage.googleapis.com, Windows Update)에 접속합니다.
+- 자격증명은 수집·저장하지 않습니다. `config/secrets.json`, `.env`, `data/`는 git에서 제외됩니다.
 
-## 범위 조정과 제거
-- 범위를 넓히거나 좁히려면 `config/permissions.json`을 편집하세요(예: 신뢰하면 `write_files`를 `allow`로).
-- `UNINSTALL_JARVIS.bat`이 로그온 자동시작을 해제하고 실행 중 프로세스를 종료합니다. 폴더·기록은 지우지 않습니다.
+## 6. 범위 조정과 제거
+- 설정 패널 또는 `config/permissions.json`으로 범위를 넓히거나 좁힙니다.
+- `UNINSTALL_JARVIS.bat`은 자동시작을 해제하고 **이 폴더에서 실행된 JARVIS 프로세스만** 종료합니다. 폴더·기록은 지우지 않습니다.

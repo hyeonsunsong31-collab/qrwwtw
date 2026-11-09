@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JARVIS Wallpaper</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #01080f; }
+    #wall { position: fixed; inset: 0;
+      background: radial-gradient(130% 100% at 50% 50%, #06202e 0%, #03121b 55%, #010a10 100%); }
+    #wall canvas { display: block; width: 100%; height: 100%; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../../node_modules/three/build/three.module.js",
+      "three/addons/": "../../node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- The 3D project space rendered as a live desktop wallpaper (requirement 18). -->
+  <div id="wall"></div>
+  <script type="module" src="wallpaper-app.js"></script>
+</body>
+</html>

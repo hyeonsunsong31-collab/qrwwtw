@@ -1,21 +1,18 @@
 """
-voice/interrupt.py — barge-in detector (requirement 13).
+voice/interrupt.py -- voice-activity detection for barge-in and end-of-speech (requirement 13).
 
-While JARVIS is speaking, this watches the microphone with WebRTC VAD. If the user starts
-talking (voiced frames for >~250 ms), it fires `on_interrupt`, which stops TTS and starts
-capturing the new command — so the user can cut JARVIS off and say something new.
+WebRTC VAD on 20 ms int16 frames (webrtcvad-wheels provides prebuilt Windows wheels; the
+import name is `webrtcvad`). Used two ways:
+  * capture: detect when the user has finished speaking a command,
+  * barge-in "vad" mode (headsets): fire after ~400 ms of continuous speech while JARVIS talks.
 """
 from __future__ import annotations
 
-from typing import Callable
-
 
 class BargeInMonitor:
-    def __init__(self, aggressiveness: int = 2, sample_rate: int = 16000,
-                 trigger_ms: int = 250):
+    def __init__(self, aggressiveness: int = 3, sample_rate: int = 16000, trigger_ms: int = 400):
         self.sample_rate = sample_rate
         self.frame_ms = 20
-        self.frame_len = int(sample_rate * self.frame_ms / 1000)  # samples per 20 ms
         self.trigger_frames = max(1, trigger_ms // self.frame_ms)
         self._voiced = 0
         self.vad = None
@@ -27,20 +24,23 @@ class BargeInMonitor:
         except Exception:
             self.available = False
 
-    def reset(self):
-        self._voiced = 0
-
-    def feed(self, frame_int16_bytes: bytes) -> bool:
-        """Feed one 20 ms int16 frame (bytes). Return True when barge-in is detected."""
+    def is_speech(self, frame: bytes) -> bool:
         if not self.available:
             return False
         try:
-            if self.vad.is_speech(frame_int16_bytes, self.sample_rate):
-                self._voiced += 1
-            else:
-                self._voiced = max(0, self._voiced - 1)
+            return bool(self.vad.is_speech(frame, self.sample_rate))
         except Exception:
             return False
+
+    def reset(self):
+        self._voiced = 0
+
+    def feed(self, frame: bytes) -> bool:
+        """Feed one 20 ms frame; True once enough continuous speech has been heard."""
+        if self.is_speech(frame):
+            self._voiced += 1
+        else:
+            self._voiced = max(0, self._voiced - 2)
         if self._voiced >= self.trigger_frames:
             self._voiced = 0
             return True

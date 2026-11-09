@@ -137,7 +137,7 @@ class Recorder:
                 run["error"] = error
             self._write_json(self.path("runs", f"{run_id}.json"), run)
         # (2-3) process explanation, (2-1) error explanation
-        verdict = "succeeded" if status == "success" else "failed"
+        verdict = {"success": "succeeded", "cancelled": "was interrupted"}.get(status, "failed")
         steps = "; ".join(s["description"] for s in run["steps"]) or "no intermediate steps"
         self.log_explanation("process",
                              f"Task '{run['intent']}' {verdict} in {run['duration_seconds']}s. "

@@ -32,6 +32,19 @@ def system_info(**_) -> dict:
     return ok(speak, data)
 
 
+def _endpoint_volume(device):
+    """IAudioEndpointVolume for a pycaw device, across pycaw versions: newer releases wrap
+    the device and expose `.EndpointVolume`; older ones return the raw IMMDevice."""
+    ev = getattr(device, "EndpointVolume", None)
+    if ev is not None:
+        return ev
+    from ctypes import cast, POINTER  # type: ignore
+    from comtypes import CLSCTX_ALL  # type: ignore
+    from pycaw.pycaw import IAudioEndpointVolume  # type: ignore
+    iface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    return cast(iface, POINTER(IAudioEndpointVolume))
+
+
 def set_volume(level=None, **_) -> dict:
     try:
         lvl = max(0, min(100, int(level)))
@@ -40,13 +53,8 @@ def set_volume(level=None, **_) -> dict:
     if not IS_WINDOWS:
         return ok(f"(Dev) Volume would be set to {lvl} percent, sir.", {"level": lvl})
     try:
-        from ctypes import cast, POINTER  # type: ignore
-        from comtypes import CLSCTX_ALL  # type: ignore
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
-        dev = AudioUtilities.GetSpeakers()
-        iface = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        vol = cast(iface, POINTER(IAudioEndpointVolume))
-        vol.SetMasterVolumeLevelScalar(lvl / 100.0, None)
+        from pycaw.pycaw import AudioUtilities  # type: ignore
+        _endpoint_volume(AudioUtilities.GetSpeakers()).SetMasterVolumeLevelScalar(lvl / 100.0, None)
         return ok(f"Volume set to {lvl} percent, sir.", {"level": lvl})
     except Exception as e:
         return fail("I couldn't adjust the volume, sir.", str(e))
@@ -57,13 +65,8 @@ def _set_mic_mute(mute: bool) -> dict:
         return ok(f"(Dev) Microphone would be {'muted' if mute else 'unmuted'}, sir.",
                   {"muted": mute})
     try:
-        from ctypes import cast, POINTER  # type: ignore
-        from comtypes import CLSCTX_ALL  # type: ignore
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
-        mic = AudioUtilities.GetMicrophone()
-        iface = mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        vol = cast(iface, POINTER(IAudioEndpointVolume))
-        vol.SetMute(1 if mute else 0, None)
+        from pycaw.pycaw import AudioUtilities  # type: ignore
+        _endpoint_volume(AudioUtilities.GetMicrophone()).SetMute(1 if mute else 0, None)
         return ok(f"Microphone {'muted' if mute else 'unmuted'}, sir.", {"muted": mute})
     except Exception as e:
         return fail("I couldn't change the microphone, sir.", str(e))

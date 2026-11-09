@@ -1,4 +1,5 @@
 {
+  "version": "1.1.0",
   "identity": {
     "name": "JARVIS",
     "persona": "A refined British gentleman's valet in the spirit of a classic butler: courteous, witty, concise, unflappable. Addresses the user as 'sir' unless told otherwise.",
@@ -9,36 +10,38 @@
     "default": "en",
     "auto_switch": true,
     "supported": ["en", "ko"],
-    "notes": "Default language is English. When the user's input is detected in another supported language, I/O switches to that language automatically (requirement 2). The signature voice is British English."
+    "notes": "Default language is English. When the user's input is Korean, replies and UI switch to Korean automatically (requirement 2). The signature voice is British English."
   },
   "voice": {
     "enabled": true,
     "tts": {
       "engine": "piper",
       "voice_en": "en_GB-alan-medium",
-      "voice_ko": "ko_KR-glow",
-      "fallback_engine": "sapi5",
-      "fallback_voice_en": "Microsoft George Desktop",
+      "voice_ko": "",
       "rate": 1.0,
       "accent": "en-GB-male",
-      "notes": "British gentleman voice (requirement 21). Piper runs fully offline; SAPI5 George is the Windows built-in British male fallback."
+      "fallback_engine": "sapi5",
+      "notes": "British gentleman voice (requirement 21) via Piper, fully offline. There is no official Piper Korean voice, so Korean replies use a Windows Korean voice (the installer adds one) unless a Korean Piper voice is found and set in voice_ko."
     },
     "stt": {
       "engine": "faster-whisper",
       "model": "auto",
-      "vad": true,
-      "language": "auto"
+      "language": "auto",
+      "notes": "auto = large-v3-turbo on an NVIDIA GPU, small on CPU."
     },
     "wakeword": {
-      "engine": "openwakeword",
+      "engine": "vosk",
       "phrase": "wake up jarvis",
-      "model": "models/wake_up_jarvis.onnx",
+      "vosk_model": "models/vosk-small-en",
+      "openwakeword_model": "models/wake_up_jarvis.onnx",
       "sensitivity": 0.6,
-      "fallback": "vosk-grammar"
+      "lenient": false,
+      "notes": "vosk = exact phrase via grammar recognition (default). openwakeword = neural detector (bundled 'hey jarvis' model, or a custom one). lenient = also wake on 'Jarvis' alone."
     },
     "barge_in": {
-      "enabled": true,
-      "notes": "User may interrupt spoken replies at any time; speech during TTS stops playback and starts a new command (requirement 13)."
+      "mode": "keyword",
+      "keywords": ["stop", "wait", "hold on", "jarvis"],
+      "notes": "keyword (default): say 'stop', 'wait', 'hold on' or 'Jarvis' while I'm speaking to interrupt, which never self-triggers on speakers. vad: any speech interrupts (best with a headset). off: no voice interruption (typing or the mic button still interrupt)."
     }
   },
   "llm": {
@@ -46,13 +49,13 @@
     "host": "http://127.0.0.1:11434",
     "model": "auto",
     "model_candidates": {
-      "high": "qwen2.5:14b-instruct",
-      "medium": "llama3.1:8b-instruct-q4_K_M",
-      "low": "qwen2.5:3b-instruct"
+      "high": "qwen2.5:14b",
+      "medium": "qwen2.5:7b",
+      "low": "qwen2.5:3b"
     },
     "temperature": 0.7,
     "context_tokens": 8192,
-    "system_prompt_file": "agent/prompts/system_en.txt"
+    "notes": "The installer pulls a model sized to this PC and writes its exact name to 'model'. 'auto' picks the strongest installed candidate."
   },
   "neural_core": {
     "enabled": true,
@@ -76,12 +79,12 @@
     "multi_monitor": true
   },
   "space3d": {
-    "gesture_control": true,
+    "gesture_control": false,
     "gesture_toggle_hotkey": "Control+Alt+G",
     "replace_wallpaper": true
   },
   "music": {
-    "backend": "yt-dlp+mpv",
+    "backend": "yt-dlp+ffplay",
     "web_player_fallback": "https://music.youtube.com/search?q="
   },
   "startup": {

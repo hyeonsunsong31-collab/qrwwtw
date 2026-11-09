@@ -74,6 +74,16 @@
     <!-- Feature dock: a button for EVERY capability (requirement 6; shown in 3D mode or when expanded) -->
     <nav id="feature-dock" class="panel interactive hidden" aria-label="features"></nav>
 
+    <!-- Holographic settings panel (requirement 2-(3): options for continuous adjustment) -->
+    <section id="settings-panel" class="panel interactive hidden" aria-label="settings">
+      <div id="settings-head">
+        <span data-i18n="settings_title">JARVIS Settings</span>
+        <button id="settings-close" class="x" title="close">×</button>
+      </div>
+      <div id="settings-body"></div>
+      <div id="settings-status" aria-live="polite"></div>
+    </section>
+
     <!-- Always-visible emergency wake button (requirements 9, 10) -->
     <button id="reactor" class="interactive" title="Wake JARVIS (Ctrl+Alt+J)" aria-label="wake">
       <svg viewBox="0 0 100 100">

@@ -4,9 +4,13 @@
   "categories": {
     "read_files": "allow",
     "write_files": "ask",
+    "jarvis_data": "allow",
     "delete_files": "ask",
     "launch_apps": "allow",
     "control_apps": "ask",
+    "window_control": "allow",
+    "keyboard_input": "ask",
+    "screen_capture": "allow",
     "read_system_info": "allow",
     "change_system_settings": "ask",
     "browser_open": "allow",
