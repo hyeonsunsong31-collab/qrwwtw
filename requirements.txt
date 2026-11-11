@@ -1,0 +1,55 @@
+# JARVIS Python backend -- Windows 10/11, Python 3.11 (installed by INSTALL_JARVIS.bat)
+#
+# Every compiled package below resolves to a prebuilt wheel for cp311 / win_amd64, and the
+# few source-only packages (pyautogui family) are pure Python, so installation never needs
+# a C compiler. Verified with:
+#   pip install --dry-run --only-binary=:all: --platform win_amd64 --python-version 3.11 ...
+
+# --- command bus / async ---
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+httpx>=0.28,<1
+pydantic>=2.10,<3
+
+# --- neural core ---
+numpy>=2.1,<3
+scipy>=1.14,<2
+
+# --- voice: wake word, speech-to-text, VAD, audio I/O ---
+vosk==0.3.45                       # exact-phrase "wake up jarvis" (grammar mode, offline)
+openwakeword==0.6.0                # optional neural wake word (runs on onnxruntime)
+faster-whisper==1.2.1              # speech-to-text (Whisper, offline)
+webrtcvad-wheels==2.0.14.post1     # voice activity detection (import name: webrtcvad)
+sounddevice>=0.5,<1
+
+# --- voice: text-to-speech (British gentleman) ---
+piper-tts==1.8.0                   # offline neural TTS, voice en_GB-alan-medium
+pyttsx3>=2.98 ; sys_platform == "win32"
+pywin32>=306 ; sys_platform == "win32"     # SAPI5 fallback voices via COM
+# Windows' own offline voices (OneCore: e.g. British "George", Korean "Heami") via WinRT.
+# Used for Korean replies (there is no Piper Korean voice) and as an English fallback.
+winrt-runtime==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Media.SpeechSynthesis==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Storage.Streams==3.2.1 ; sys_platform == "win32"
+
+# --- PC control (Windows) ---
+psutil>=6.1
+pyautogui>=0.9.54                  # typing / hotkeys / screenshots (pure Python, no compiler)
+pygetwindow>=0.0.9 ; sys_platform == "win32"   # window focus/min/max (pure Python)
+pycaw>=20240210 ; sys_platform == "win32"  # speaker volume + microphone mute
+comtypes>=1.4.8 ; sys_platform == "win32"
+
+# --- browser page reading (browser engine is fetched on first use) ---
+playwright>=1.49
+
+# --- web music (kept current by the supervisor's weekly update) ---
+yt-dlp>=2025.1.1
+
+# --- tray icon ---
+pystray>=0.19.5
+Pillow>=11.0
+
+# NOTE: Ollama (the local LLM runtime) and FFmpeg (ffplay, for music playback) are native
+# apps, not pip packages; scripts/setup_windows.ps1 installs them.

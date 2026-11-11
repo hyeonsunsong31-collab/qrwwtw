@@ -1,0 +1,12 @@
+# Windows scripts must have CRLF line endings. With these rules both a git checkout and a
+# GitHub "Download ZIP" (git archive) deliver CRLF, while the repository stores LF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Everything else: normalise to LF in the repository.
+*       text=auto
+*.png   binary
+*.ico   binary
+*.onnx  binary
+*.glb   binary

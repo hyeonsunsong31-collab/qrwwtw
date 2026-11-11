@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node / Electron
+node_modules/
+dist/
+out/
+
+# JARVIS runtime data (logs, recordings, generated files, checkpoints)
+data/*
+!data/.gitkeep
+
+# Downloaded by the installer on the user's PC (models, voices, FFmpeg) -- can be gigabytes
+models/
+voices/
+tools/
+*.gguf
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets (never commit)
+config/secrets.json
+.env
