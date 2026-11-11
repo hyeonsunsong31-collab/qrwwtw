@@ -46,7 +46,7 @@ def check_config():
 
 def check_imports():
     head("Module imports")
-    mods = ["core.synaptic_perceptron", "core.brain_mesh", "core.control_layer", "core.scale",
+    mods = ["core.synaptic_perceptron", "core.brain_mesh", "core.control_layer", "core.drive", "core.scale",
             "recorder.recorder", "agent.nlu", "agent.permissions", "agent.llm_ollama",
             "agent.settings", "agent.replies_ko", "agent.orchestrator", "agent.skills",
             "agent.skills.windows", "agent.server", "voice.wakeword", "voice.stt", "voice.tts",

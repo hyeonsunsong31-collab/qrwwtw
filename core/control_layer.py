@@ -37,6 +37,7 @@ from typing import Dict, Optional
 import numpy as np
 
 from .brain_mesh import BrainMesh
+from .drive import DriveSystem
 from .scale import resolve_scale
 
 SIGNALS = ["formality", "verbosity", "confidence", "persona_adherence", "warmth", "caution"]
@@ -103,10 +104,11 @@ class Control:
     signals: Dict[str, float] = field(default_factory=dict)
     style_directive: str = ""
     llm_params: Dict[str, float] = field(default_factory=dict)
+    internal_state: Dict = field(default_factory=dict)   # the drive-layer disposition
 
     def as_dict(self):
         return {"signals": self.signals, "style_directive": self.style_directive,
-                "llm_params": self.llm_params}
+                "llm_params": self.llm_params, "internal_state": self.internal_state}
 
 
 class ControlLayer:
@@ -122,6 +124,7 @@ class ControlLayer:
         self._th_dim = min(256, th_e - th_s)
         self._P = rng.normal(0.0, 1.0, size=(self._th_dim, 8)).astype(np.float32)
         self.last_features: Optional[Features] = None
+        self.drive = DriveSystem(state_dir=state_dir)   # motivational / homeostatic layer
         self.load()
 
     # ------------------------------------------------------------ priors #
@@ -159,14 +162,27 @@ class ControlLayer:
             val = priors[s] + 0.12 * mesh_delta + self.learned_bias[s]
             signals[s] = float(np.clip(val, 0.0, 1.0))
 
+        # motivational layer: the current disposition nudges tone toward cooperation
+        signals = self.drive.modulate(signals)
+        internal = self.drive.internal_state(lang)
+
+        # LLM params are derived AFTER modulation so caution/verbosity stay consistent
         params = dict(base_params or {"temperature": 0.7, "num_predict": 400})
         params["temperature"] = round(float(np.clip(
             0.35 + 0.55 * (1 - signals["caution"]) * (1 - 0.4 * signals["confidence"]), 0.15, 1.0)), 3)
         params["num_predict"] = int(80 + 900 * signals["verbosity"])
 
-        return Control(signals=signals,
-                       style_directive=self._directive(signals, lang),
-                       llm_params=params)
+        directive = self._directive(signals, lang)
+        drive_line = self.drive.directive(lang)
+        if drive_line:
+            directive = (directive + " " + drive_line).strip()
+        return Control(signals=signals, style_directive=directive, llm_params=params,
+                       internal_state=internal)
+
+    def note_outcome(self, outcome: str, risk: float = 0.0, sentiment: float = 0.0,
+                     cooperative=None) -> dict:
+        """Report how an interaction went so the drive layer can update its disposition."""
+        return self.drive.appraise(outcome, risk=risk, sentiment=sentiment, cooperative=cooperative)
 
     @staticmethod
     def _directive(s: Dict[str, float], lang: str) -> str:

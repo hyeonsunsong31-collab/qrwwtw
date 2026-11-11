@@ -43,7 +43,7 @@ from .orchestrator import Orchestrator
 from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

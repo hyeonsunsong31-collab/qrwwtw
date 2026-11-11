@@ -81,6 +81,7 @@ class Orchestrator:
         self.history: List[dict] = []
         self.default_lang = config.get("language", {}).get("default", "en")
         self.awake = True
+        self._last_denied = False
 
     # --------------------------------------------------------------- utils #
     async def _emit(self, event: dict):
@@ -101,6 +102,9 @@ class Orchestrator:
         await self._emit({"type": "wake_response", "text": resp, "lang": "en"})
         await self._emit({"type": "say", "text": resp, "lang": "en"})
         self.recorder.log_conversation("assistant", resp, lang="en")
+        # the user reaching out strengthens rapport (drive layer, requirement 1)
+        state = await self._run_blocking(self.control.note_outcome, "engaged")
+        await self._emit({"type": "control", "state": state})
 
     async def handle_feedback(self, signals: dict):
         """User tunes behaviour (e.g. 'too long'): the mesh learns (requirement 1)."""
@@ -125,12 +129,16 @@ class Orchestrator:
         intent = parse_intent(text, lang=lang)
         skill = REGISTRY.get(intent.name)
         risk = self.permissions.risk_of(skill.category, text) if skill else 0.0
+        self._last_denied = False
         control = await self._run_blocking(self.control.compute, text, lang, risk)
-        await self._emit({"type": "control", "signals": control.signals})
+        sentiment = self.control.last_features.sentiment if self.control.last_features else 0.0
+        await self._emit({"type": "control", "signals": control.signals,
+                          "state": control.internal_state})
 
         rid = self.recorder.start_run(
             cid, intent.name, description=text,
             eta_seconds=self.recorder.estimate_eta(skill.eta) if skill else None)
+        outcome = "success"
         try:
             if skill and intent.name != "chat" and intent.confidence >= DIRECT_SKILL_MIN_CONF:
                 reply, lang = await self._do_skill(intent.name, intent.args, text, lang, rid)
@@ -139,14 +147,20 @@ class Orchestrator:
             else:
                 reply, to_say = await self._do_chat(text, lang, control, rid)
             self.recorder.end_run(rid, "success", summary=reply[:200])
+            outcome = "denied" if self._last_denied else "success"
         except asyncio.CancelledError:
             self.recorder.end_run(rid, "cancelled", summary="interrupted by the user")
+            await self._run_blocking(self.control.note_outcome, "interrupted", risk, sentiment)
             raise
         except Exception as e:  # never crash the bus
             self.recorder.end_run(rid, "failed", error=repr(e))
             reply = ("My apologies, sir - something went wrong carrying that out."
                      if lang == "en" else "죄송합니다, sir - 수행 중 문제가 발생했습니다.")
             to_say = reply
+            outcome = "failed"
+        # update the drive layer's disposition from how this interaction went
+        drive_state = await self._run_blocking(self.control.note_outcome, outcome, risk, sentiment)
+        await self._emit({"type": "control", "state": drive_state})
 
         self.history.append({"role": "assistant", "text": reply})
         self.history[:] = self.history[-24:]
@@ -172,6 +186,7 @@ class Orchestrator:
             risk=self.permissions.risk_of(skill.category, text)))
         if not granted:
             self.recorder.run_step(rid, "permission denied", status="denied")
+            self._last_denied = True
             return (("I'll hold off on that, sir - permission wasn't granted."
                      if lang == "en" else "그 작업은 보류하겠습니다, sir - 권한이 없습니다."), lang)
 

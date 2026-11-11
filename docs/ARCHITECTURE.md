@@ -43,6 +43,10 @@
 `control_layer.py`(제어신호 6종으로 LLM 파라미터·스타일·후처리 조절, 피드백 학습을 디스크에 저장) · `scale.py`(명목 2e11 vs 실제).
 `neural_points` 메시지로 실시간 상태를 3D 공간에 점구름으로 보여줍니다.
 
+**동기 코어 (v1.2, `core/drive.py`):** 제어 계층 위의 항상성 계층. `energy`·`rapport` 상태로 내적 상태 라벨과 협력 지향 드라이브를
+만들고, 제어신호 6종을 조정(주의는 올리기만)한 뒤 결과를 `appraise`로 반영해 `data/brain/drive.json`에 저장합니다.
+`control` 이벤트로 HUD 성향 칩에 표시. 어조 신호 외에는 아무것도 바꿀 수 없고, 낮은 상태에서도 서비스는 정지하지 않습니다 → `docs/DRIVE.md`.
+
 ## 음성 (요구 3·7·8·12·13·21) — `voice/`
 ```
 IDLE ──"wake up jarvis"(Vosk 문법 / openWakeWord)──► on_wake → 응답을 말한 뒤 CAPTURE

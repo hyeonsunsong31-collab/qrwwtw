@@ -192,3 +192,7 @@ body { font-family: var(--font); color: var(--cyan-soft);
 #settings-status { padding: 8px 14px; font-size: 11px; border-top: 1px solid var(--line); min-height: 30px; opacity: .85; }
 #settings-body::-webkit-scrollbar { width: 6px; }
 #settings-body::-webkit-scrollbar-thumb { background: var(--cyan-dim); border-radius: 3px; }
+
+/* Drive-layer disposition chip (motivational core) */
+.badge.disposition { border-color: rgba(138,243,255,.5); color: var(--cyan-soft); cursor: help;
+  text-transform: lowercase; letter-spacing: .08em; }

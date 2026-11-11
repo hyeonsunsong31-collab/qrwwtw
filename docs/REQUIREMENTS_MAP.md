@@ -14,6 +14,7 @@
 | 1 | 소뇌/대뇌피질/시상 + 부수 구성의 3D 그물망 | `core/brain_mesh.py` | 3D 좌표 + 희소 연결(근접 바이어스 + 모듈간 투사 룰북). 핵심 3 + Brainstem/Hippocampus/BasalGanglia. 3D 공간에서 실시간 점구름으로 시각화. | ✅ 🌐 |
 | 1 | 약 2000억 개 연결 | `core/scale.py` | `nominal_neurons=2e11`(설계값), `active_neurons`는 RAM 기반 실제 구동. 구조는 규모 불변. | 📝 |
 | 1 | 출력을 제어하는 능력 | `core/control_layer.py` | 메시 리드아웃 → 제어신호 6종 → LLM 파라미터·스타일·후처리 모듈레이션. 피드백으로 시냅스 가소성 학습, 디스크에 영구 저장. | ✅ |
+| 1+ | 궁극적 목적·내적 도구의 틀(동기 코어, v1.2) | `core/drive.py`, `docs/DRIVE.md` | 항상성(energy·rapport) + 내적 상태 라벨·협력 지향 드라이브 → 제어신호 조정. 임계점 정지는 의도적으로 제외, 어조 신호만 변경, 주의는 절대 낮추지 않음. | ✅ 🌐 |
 | 2 | 부팅(로그온) 시 자동 실행 | `boot/register_autostart.ps1`, `boot/jarvis_service.py` | 실제 로그온 사용자에게 예약작업 등록, 실패 시 재시작, 시간 제한 없음. | ⚙️ |
 | 2 | 모든 기록 저장 | `recorder/recorder.py`, `agent/orchestrator.py` | `runs/` `commands/` `results/files/`(생성 파일: 파일 쓰기·스크린샷·3D 프로젝트·.glb) `text/conversation` `text/explanations/{errors,answers,process,eta}` `text/options` `text/suggestions` `checkpoints/` `audit/`. 중단된 작업은 "interrupted"로 기록. | ✅ |
 | 2 | 입력 언어에 따른 입출력 자동 전환 | `agent/nlu.py`, `agent/replies_ko.py`, `overlay/renderer/i18n.js` | 한글 감지 → 답변·스킬 응답·UI·음성 모두 한국어. | ✅ 🌐 |

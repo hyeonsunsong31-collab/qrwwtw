@@ -11,6 +11,7 @@ export const STRINGS = {
     settings_title: "JARVIS Settings", settings_general: "General",
     settings_permissions: "Permissions", saved: "Saved",
     restart_note: "applies after JARVIS restarts", llm_offline: "language engine offline",
+    mood: { calm: "steady", attentive: "attentive", rebuilding: "rebuilding trust", engaged: "engaged" },
     feat: {
       space3d: "3D Space", addobj: "Add Object", clone: "Clone", delete: "Delete",
       save: "Save Project", export: "Export .glb", neural: "Neural View", gesture: "Gestures",
@@ -29,6 +30,7 @@ export const STRINGS = {
     perm_title: "권한 필요", allow: "허용", deny: "거부",
     settings_title: "자비스 설정", settings_general: "일반", settings_permissions: "권한",
     saved: "저장됨", restart_note: "자비스를 다시 시작하면 적용됩니다", llm_offline: "언어 엔진 오프라인",
+    mood: { calm: "안정", attentive: "주의 깊음", rebuilding: "신뢰 회복 중", engaged: "몰입" },
     feat: {
       space3d: "3D 공간", addobj: "오브젝트 추가", clone: "복제", delete: "삭제",
       save: "프로젝트 저장", export: ".glb 내보내기", neural: "신경망 보기", gesture: "손동작",

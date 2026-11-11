@@ -182,8 +182,23 @@ function permissionToast(msg) {
 
 /* ------------------------------------------------------------ bus events ---- */
 function maybeSwitchLang(lang) {
-  if (lang && lang !== getLang()) { setLang(lang); if (buttons) buttons.rerenderLabels(); }
+  if (lang && lang !== getLang()) {
+    setLang(lang);
+    if (buttons) buttons.rerenderLabels();
+    if (disposition) renderDisposition(disposition);
+  }
 }
+let disposition = null;
+function renderDisposition(state) {
+  disposition = state || disposition;
+  const el = document.getElementById("disposition");
+  if (!el || !disposition) return;
+  el.textContent = t("mood." + (disposition.mood || "calm"));
+  el.title = `${disposition.purpose || ""}\n${disposition.drive || ""}`.trim();
+  el.classList.remove("hidden");
+  if (ring) ring.title = `${disposition.label || "JARVIS"} — ${disposition.drive || ""}`;
+}
+
 function renderStatus() {
   const act = Number(status.neurons_active || 0).toLocaleString();
   const nom = Number(status.neurons_nominal || 2e11).toExponential(1);
@@ -213,6 +228,7 @@ bus.on("say", (m) => {
 });
 bus.on("stop_tts", stopSpeaking);
 bus.on("wake_response", () => { buttons.reactor.classList.add("awake"); chat.show(); });
+bus.on("control", (m) => { if (m.state) renderDisposition(m.state); });
 bus.on("options", (m) => chat.setOptions(m.options || [], m.suggestions || []));
 bus.on("ui", (m) => handleUi(m.action, m.args || {}));
 bus.on("permission_request", permissionToast);
