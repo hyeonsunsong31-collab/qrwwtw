@@ -68,8 +68,10 @@ def play_music(query: str, **_) -> dict:
         title, url = _resolve_stream(q)
         if url:
             kind, exe = player
-            cmd = ([exe, "-nodisp", "-autoexit", "-loglevel", "quiet", url] if kind == "ffplay"
-                   else [exe, "--no-video", "--really-quiet", url])
+            # the title marks the process as JARVIS's own player (boot/common.py finds it
+            # by this when JARVIS is stopped or restarted, so music never plays on orphaned)
+            cmd = ([exe, "-nodisp", "-autoexit", "-loglevel", "quiet", "-window_title", "JARVIS-music", url]
+                   if kind == "ffplay" else [exe, "--no-video", "--really-quiet", "--title=JARVIS-music", url])
             try:
                 with _lock:
                     _stop_locked()

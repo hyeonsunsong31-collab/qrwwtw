@@ -48,6 +48,13 @@
       <div id="state-label" data-i18n="state_idle">standby</div>
     </div>
 
+    <!-- Start-up banner: JARVIS says where it is the moment the HUD is on screen -->
+    <div id="announce" class="hidden" role="status" aria-live="polite">
+      <div class="an-title">J.A.R.V.I.S</div>
+      <div class="an-status" id="announce-status">starting up</div>
+      <div class="an-hint" data-i18n="announce_hint">Say "wake up Jarvis" · click WAKE · Ctrl+Alt+J</div>
+    </div>
+
     <!-- Chat box hologram (requirement 6) -->
     <section id="chat-panel" class="panel interactive hidden">
       <div id="chat-head">

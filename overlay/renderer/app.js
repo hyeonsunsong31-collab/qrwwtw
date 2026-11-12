@@ -102,8 +102,33 @@ async function toggleNeural() {
   neuralTimer = setInterval(() => bus.send({ type: "neural_points", max_points: 3000 }), 2500);
 }
 
+/* ----------------------------------------------- start-up / "show yourself" banner ---- */
+let announceTimer = null;
+function announceText() {
+  const el = document.getElementById("announce-status");
+  el.textContent = t(bus.connected ? "announce_online" : "announce_starting");
+  el.classList.toggle("ok", bus.connected);
+}
+function hideAnnounce() {
+  const el = document.getElementById("announce");
+  el.classList.add("leaving");
+  buttons.reactor.classList.remove("attention");
+  setTimeout(() => { el.classList.add("hidden"); el.classList.remove("leaving"); }, 700);
+}
+function announce() {
+  const el = document.getElementById("announce");
+  announceText();
+  el.classList.remove("hidden", "leaving");
+  buttons.reactor.classList.add("attention");        // draw the eye to the WAKE button too
+  clearTimeout(announceTimer);
+  // stays until the brain is connected (then a few seconds more), but never forever
+  announceTimer = setTimeout(hideAnnounce, bus.connected ? 7000 : 60000);
+}
+function announceVisible() { return !document.getElementById("announce").classList.contains("hidden"); }
+
 async function handleUi(action, args = {}) {
   switch (action) {
+    case "announce": announce(); break;
     case "open_space3d": await openSpace3d(); break;
     case "close_space3d": closeSpace3d(); break;
     case "clone_object": if (await openSpace3d()) space3d.clone(); break;
@@ -186,6 +211,7 @@ function maybeSwitchLang(lang) {
     setLang(lang);
     if (buttons) buttons.rerenderLabels();
     if (disposition) renderDisposition(disposition);
+    if (announceVisible()) announceText();
   }
 }
 let disposition = null;
@@ -211,8 +237,14 @@ bus.on("hello", (m) => {
   setLang((cfg.language && cfg.language.default) || "en");
   buttons.rerenderLabels();
   renderStatus();
+  if (announceVisible()) announceText();
 });
-bus.on("_open", () => connDot.classList.add("ok"));
+bus.on("_open", () => { connDot.classList.add("ok"); if (announceVisible()) announce(); });
+bus.on("status", (m) => {                    // e.g. the voice engine finished loading
+  status = m.status || status;
+  backendHasVoice = !!status.voice;
+  renderStatus();
+});
 bus.on("_close", () => { connDot.classList.remove("ok"); neuralReadout.textContent = "neural mesh · offline"; });
 bus.on("state", (m) => setState(m.state || "idle"));
 bus.on("transcript", (m) => {
@@ -241,6 +273,7 @@ bus.on("error", (m) => toast("JARVIS", m.message || "error", "danger"));
 function wirePreload() {
   if (!window.jarvis) return;
   window.jarvis.onWake(() => { bus.wake(); buttons.reactor.classList.add("awake"); });
+  if (window.jarvis.onAnnounce) window.jarvis.onAnnounce(() => announce());
   window.jarvis.onOpenSpace3d(() => openSpace3d());
   window.jarvis.onToggleChat(() => chat.toggle());
   window.jarvis.onToggleGesture(() => handleUi("toggle_gesture"));
@@ -268,6 +301,7 @@ function main() {
   setState("idle");
   document.querySelectorAll(".interactive").forEach(makeInteractive);
   wirePreload();
+  if (window.jarvis && window.jarvis.ready) window.jarvis.ready();   // main shows the HUD and announces it
 }
 
 window.addEventListener("DOMContentLoaded", main);

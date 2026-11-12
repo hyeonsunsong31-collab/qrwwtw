@@ -3,16 +3,20 @@
  * on any screen, travel the same path. Each connection presents the per-session token the
  * backend writes to data/session.token (read through the preload bridge, re-read on every
  * reconnect so a backend restart is picked up automatically). Messages queue until open. */
-const WS_URL = 'ws://127.0.0.1:8765/ws';
+const DEFAULT_PORT = 8765;
 
 class Bus {
   constructor() { this.subs = {}; this.ws = null; this.connected = false; this.queue = []; this.connect(); }
 
   async connect() {
-    let token = '';
-    try { token = window.jarvis ? (await window.jarvis.getToken()) || '' : ''; } catch (e) {}
+    let token = '', port = DEFAULT_PORT;
+    try {
+      const j = window.jarvis;
+      if (j && j.getSession) { const s = (await j.getSession()) || {}; token = s.token || ''; port = s.port || DEFAULT_PORT; }
+      else if (j) token = (await j.getToken()) || '';
+    } catch (e) {}
     if (!token) return this._retry();              // backend not started yet
-    try { this.ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`); }
+    try { this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`); }
     catch (e) { return this._retry(); }
     this.ws.onopen = () => {
       this.connected = true; this.emit('_open');

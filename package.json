@@ -1,6 +1,6 @@
 {
   "name": "jarvis-overlay",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "JARVIS holographic overlay + 3D modelling space (Electron + Three.js + MediaPipe)",
   "main": "overlay/main.js",
   "private": true,

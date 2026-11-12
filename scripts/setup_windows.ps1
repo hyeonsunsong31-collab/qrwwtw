@@ -3,16 +3,22 @@
 
   Installs everything JARVIS needs, then starts it, so one double-click gives a JARVIS
   that runs now and at every logon afterwards:
-    1. preflight checks (Windows version, disk space, folder location, unblock files)
-    2. Python 3.11 + virtual environment + Python packages
-    3. Node.js LTS + overlay packages (Electron, three.js, MediaPipe)
+    1. preflight checks (Windows version, disk space, folder location, unblock files),
+       and stop a JARVIS that is still running from an earlier install
+    2. Python 3.11 + virtual environment + Python packages (+ the Visual C++ runtime)
+    3. the on-screen display: Electron, three.js, MediaPipe (downloaded and verified by
+       boot\overlay_runtime.py -- no Node.js needed; without it JARVIS has nothing to show,
+       so a failure here fails the install instead of being a footnote)
     4. FFmpeg (ffplay, for music playback)
     5. Ollama + a language model sized to this PC (GPU VRAM / RAM)
     6. voices and speech models (British Piper voice, Vosk wake-phrase model,
        openWakeWord, Whisper, hand-tracking model, Windows en-GB/ko-KR voices)
     7. folder permissions + auto-start at logon
     8. self-test (scripts/healthcheck.py)
-    9. launch as the logged-on user
+    9. launch as the logged-on user, then wait until JARVIS is really on screen
+
+  Exit codes: 0 = installed and on screen, 2 = installed but it did not come up (the
+  reason is printed), 1 = setup failed.
 
   Every step is idempotent: running the installer again skips what is already done and
   repairs what isn't. Network steps retry. Full log: data\install.log.
@@ -55,7 +61,7 @@ function Retry([scriptblock]$Action, [int]$Tries = 3, [string]$What = "step") {
     for ($i = 1; $i -le $Tries; $i++) {
         $global:LASTEXITCODE = 0
         $failed = $false
-        try { & $Action } catch { $failed = $true; Info "    error: $($_.Exception.Message)" }
+        try { & $Action | Out-Host } catch { $failed = $true; Info "    error: $($_.Exception.Message)" }
         if (-not $failed -and $global:LASTEXITCODE -eq 0) { return $true }
         if ($i -lt $Tries) { Info "    $What failed (attempt $i of $Tries), retrying..."; Start-Sleep -Seconds (5 * $i) }
     }
@@ -100,10 +106,36 @@ if ($Root -like "$env:ProgramFiles*" -or $Root -like "${env:ProgramFiles(x86)}*"
 $consoleUser = (Get-CimInstance Win32_ComputerSystem).UserName
 $me = "$env:USERDOMAIN\$env:USERNAME"
 if ($consoleUser -and $consoleUser -ne $me) {
-    Warn "Installing as $me for $consoleUser. Python and Node.js are installed for all users; if JARVIS later reports the language engine offline, run Ollama's installer once from $consoleUser's account."
+    Warn "Installing as $me for $consoleUser. Python is installed for all users; if JARVIS later reports the language engine offline, run Ollama's installer once from $consoleUser's account."
+}
+foreach ($od in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
+    if ($od -and $Root.StartsWith($od, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Warn "JARVIS is inside OneDrive. Syncing its program files slows it down and can lock them; a plain folder such as C:\JARVIS works better."
+        break
+    }
+}
+if ($Root -match '[^\x00-\x7F]') {
+    Warn "The folder path contains non-English characters; some speech models cannot be loaded from such a path. A folder such as C:\JARVIS avoids that."
 }
 Get-ChildItem -Path $Root -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
 Ok "files unblocked"
+
+# A JARVIS that is still running (an earlier version, or this one) would keep files locked
+# and keep the old program in memory. Stop it; step 9 starts the new one.
+function Stop-Jarvis {
+    $vpy = Join-Path $Root ".venv\Scripts\python.exe"
+    if (Test-Path $vpy) {
+        try { & $vpy (Join-Path $Root "boot\launcher.py") --stop | Out-Null } catch {}
+    }
+    try {
+        Get-CimInstance Win32_Process | Where-Object {
+            @('python.exe', 'pythonw.exe', 'electron.exe', 'node.exe') -contains $_.Name -and
+            $_.CommandLine -and $_.CommandLine.Contains($Root)
+        } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+}
+Stop-Jarvis
+Ok "no JARVIS left running from an earlier start"
 
 # ---------------------------------------------------------------------------- 2
 Section 2 "Python 3.11 and Python packages"
@@ -135,6 +167,13 @@ if (-not $Py) {
     $script:Fatal = $true
 } else {
     Ok "Python: $Py"
+    if (Test-Path $VPy) {
+        & $VPy -c "import sys" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Info "  the existing Python environment is broken; rebuilding it"
+            Remove-Item -Recurse -Force (Join-Path $Root ".venv") -ErrorAction SilentlyContinue
+        }
+    }
     if (-not (Test-Path $VPy)) { & $Py -m venv (Join-Path $Root ".venv") }
     & $VPy -m pip install --upgrade pip --disable-pip-version-check -q | Out-Host
     $okPip = Retry { & $VPy -m pip install --prefer-binary --disable-pip-version-check -r (Join-Path $Root "requirements.txt") } 3 "pip install"
@@ -143,30 +182,47 @@ if (-not $Py) {
     else { Warn "Some Python packages failed to install (see the log)."; $script:Fatal = $true }
 }
 
-# ---------------------------------------------------------------------------- 3
-Section 3 "Node.js and the holographic overlay"
-function Find-Npm {
-    if (Have "npm") { return (Get-Command npm).Source }
-    $c = "$env:ProgramFiles\nodejs\npm.cmd"
-    if (Test-Path $c) { return $c }
-    return $null
+# The speech packages (onnxruntime, ctranslate2) need the Visual C++ runtime. Most PCs
+# already have it; add it where it is missing so voice does not fail with "DLL load failed".
+$sys32 = Join-Path $env:SystemRoot "System32"
+if (-not ((Test-Path (Join-Path $sys32 "msvcp140.dll")) -and (Test-Path (Join-Path $sys32 "vcruntime140_1.dll")))) {
+    Info "  installing the Microsoft Visual C++ runtime ..."
+    if (-not (Winget-Install "Microsoft.VCRedist.2015+.x64")) {
+        $vc = Join-Path $Downloads "vc_redist.x64.exe"
+        if (Download "https://aka.ms/vs/17/release/vc_redist.x64.exe" $vc) {
+            Start-Process -FilePath $vc -ArgumentList "/install /quiet /norestart" -Wait
+        }
+    }
+    if (Test-Path (Join-Path $sys32 "msvcp140.dll")) { Ok "Visual C++ runtime installed" }
+    else { Warn "The Visual C++ runtime could not be installed; voice features may not load until it is." }
 }
-if (-not (Find-Npm)) { Winget-Install "OpenJS.NodeJS.LTS" | Out-Null }
-if (-not (Find-Npm)) {
-    $msi = Join-Path $Downloads "node-v22.12.0-x64.msi"
-    if (Download "https://nodejs.org/dist/v22.12.0/node-v22.12.0-x64.msi" $msi) {
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
-        Refresh-Path
+
+# ---------------------------------------------------------------------------- 3
+Section 3 "Holographic overlay (Electron, three.js, MediaPipe)"
+# Downloaded straight from the npm registry and Electron's releases and verified against
+# package-lock.json / Electron's checksums. Node.js is not needed.
+$overlayOk = $false
+if (Test-Path $VPy) {
+    $overlayOk = Retry { & $VPy (Join-Path $Root "boot\overlay_runtime.py") } 2 "overlay download"
+    if (-not $overlayOk) {
+        $npm = $null
+        if (Have "npm") { $npm = (Get-Command npm).Source }
+        elseif (Test-Path "$env:ProgramFiles\nodejs\npm.cmd") { $npm = "$env:ProgramFiles\nodejs\npm.cmd" }
+        if ($npm) {
+            Info "  trying npm as a second route ..."
+            Push-Location $Root
+            Retry { & $npm install --no-audit --no-fund --loglevel=error } 1 "npm install" | Out-Null
+            Pop-Location
+            & $VPy (Join-Path $Root "boot\overlay_runtime.py") --check | Out-Host
+            $overlayOk = ($LASTEXITCODE -eq 0)
+        }
     }
 }
-$Npm = Find-Npm
-if ($Npm) {
-    Push-Location $Root
-    $okNpm = Retry { & $Npm install --no-audit --no-fund --loglevel=error } 2 "npm install"
-    Pop-Location
-    if ($okNpm) { Ok "overlay packages installed (Electron, three.js, MediaPipe)" }
-    else { Warn "npm install failed; the holographic overlay will not start until it succeeds." }
-} else { Warn "Node.js could not be installed; the holographic overlay will not start." }
+if ($overlayOk) { Ok "on-screen display installed (Electron, three.js, MediaPipe)" }
+else {
+    Warn "The on-screen display could not be downloaded (github.com / registry.npmjs.org unreachable?). Without it JARVIS has nothing to show."
+    $script:Fatal = $true
+}
 
 # ---------------------------------------------------------------------------- 4
 Section 4 "FFmpeg (music playback)"
@@ -296,18 +352,24 @@ if (Test-Path $VPy) { & $VPy (Join-Path $Root "scripts\healthcheck.py") | Out-Ho
 
 # ---------------------------------------------------------------------------- 9
 Section 9 "Launch"
+$launchRc = 0
 if ($NoLaunch -or $script:Fatal) {
     Info "  not launching (see the warnings below)."
 } else {
+    Stop-Jarvis
     $started = $false
     if (Get-ScheduledTask -TaskName "JARVIS" -ErrorAction SilentlyContinue) {
-        try { Start-ScheduledTask -TaskName "JARVIS"; $started = $true } catch {}
+        try { Start-ScheduledTask -TaskName "JARVIS" -ErrorAction Stop; $started = $true } catch {}
     }
     if (-not $started) {
         $pw = Join-Path $Root ".venv\Scripts\pythonw.exe"
         Start-Process -FilePath $pw -ArgumentList "`"$(Join-Path $Root 'boot\jarvis_service.py')`"" -WorkingDirectory $Root
     }
-    Ok "JARVIS is starting. Say 'wake up Jarvis' or press the WAKE button."
+    # Do not just hope: wait until the HUD is on screen and connected, or say why it is not.
+    & $VPy (Join-Path $Root "boot\launcher.py") --wait --no-open | Out-Host
+    $launchRc = $LASTEXITCODE
+    if ($launchRc -eq 0) { Ok "JARVIS is on screen. Say 'wake up Jarvis' or press the WAKE button." }
+    else { Warn "JARVIS is installed but did not come up on screen; the reason is printed above." }
 }
 
 Write-Host ""
@@ -319,4 +381,4 @@ if ($script:Warnings.Count -gt 0) {
 }
 Write-Host "Full log: $(Join-Path $Data 'install.log')"
 try { Stop-Transcript | Out-Null } catch {}
-if ($script:Fatal) { exit 1 } else { exit 0 }
+if ($script:Fatal) { exit 1 } elseif ($launchRc -ne 0) { exit 2 } else { exit 0 }
