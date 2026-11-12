@@ -66,6 +66,11 @@
     "modules": ["cortex", "cerebellum", "thalamus", "brainstem", "hippocampus", "basal_ganglia"],
     "notes": "nominal_neurons is the documented design scale (requirement 1). active_neurons is what actually instantiates, bounded by detected RAM. The mesh runs as a control/modulation layer over the LLM output."
   },
+  "self_model": {
+    "enabled": true,
+    "directive": "Maximize utility and service to the user.",
+    "notes": "The self core (core/self_model.py). 'directive' is shown for reference only: it is a constant in code, so editing this line changes nothing. 'enabled' switches self-learning: what JARVIS learns from your requests and what you ask it to remember, stored in data/brain/self_model.json. Say 'what have you learned' to see it and 'forget what you have learned' to clear it."
+  },
   "server": {
     "host": "127.0.0.1",
     "port": 8765,
@@ -76,7 +81,8 @@
     "emergency_wake_button": true,
     "theme": "jarvis-hologram",
     "global_hotkey": "Control+Alt+J",
-    "multi_monitor": true
+    "multi_monitor": true,
+    "safe_graphics": false
   },
   "space3d": {
     "gesture_control": false,

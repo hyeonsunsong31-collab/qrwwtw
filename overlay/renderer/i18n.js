@@ -21,6 +21,7 @@ export const STRINGS = {
       search: "Find Files", openapp: "Open App", screenshot: "Screenshot", web: "Web Search",
       volume: "Volume", devices: "Devices", settings: "Windows Settings",
       jsettings: "JARVIS Settings", chat: "Chat", sleep: "Sleep",
+      aboutme: "About JARVIS", remember: "Remember…",
     },
   },
   ko: {
@@ -42,6 +43,7 @@ export const STRINGS = {
       search: "파일 검색", openapp: "앱 열기", screenshot: "스크린샷", web: "웹 검색",
       volume: "볼륨", devices: "장치", settings: "Windows 설정",
       jsettings: "자비스 설정", chat: "채팅", sleep: "대기 모드",
+      aboutme: "자비스 소개", remember: "기억시키기",
     },
   },
 };

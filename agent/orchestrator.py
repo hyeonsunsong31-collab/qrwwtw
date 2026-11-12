@@ -9,6 +9,9 @@ Pipeline per command:
   detect language -> log -> parse intent -> neural control signals -> skill or LLM
   -> permission gate for any PC action -> reply -> options + suggestions -> checkpoint.
 
+After every command the self core (core/self_model.py) learns from how it went, and its
+fixed directive plus what it has learned are part of the language model's instructions.
+
 LLM replies are STREAMED: each finished sentence is spoken as soon as it exists, so JARVIS
 starts talking within a moment instead of after the whole answer is generated (requirement
 11). A new command or a barge-in cancels the task; the run is recorded as interrupted.
@@ -30,7 +33,7 @@ from recorder import Recorder
 from .nlu import parse_intent, detect_language, parse_action_tags, strip_action_tags
 from .permissions import PermissionManager, PermissionRequest
 from .replies_ko import localize
-from .skills import REGISTRY
+from .skills import REGISTRY, selfcore
 
 EmitFn = Callable[[dict], Awaitable[None]]
 
@@ -82,8 +85,33 @@ class Orchestrator:
         self.default_lang = config.get("language", {}).get("default", "en")
         self.awake = True
         self._last_denied = False
+        # the self core: fixed directive + the self-model learned from experience
+        self.selfmodel = getattr(self.control, "selfmodel", None)
+        if self.selfmodel is not None:
+            self.selfmodel.enabled = self._self_learning()
+            selfcore.bind(self.selfmodel)
 
     # --------------------------------------------------------------- utils #
+    def _self_learning(self) -> bool:
+        return bool(self.config.get("self_model", {}).get("enabled", True))
+
+    def self_summary(self) -> Optional[dict]:
+        return self.selfmodel.summary() if self.selfmodel is not None else None
+
+    async def _learn(self, intent_name: str, lang: str, outcome: str, rid: Optional[str] = None):
+        """Self-education step: the self-model integrates how this request went."""
+        if self.selfmodel is None or intent_name == "self_forget":
+            return
+        try:
+            note = await self._run_blocking(self.selfmodel.observe, intent_name, lang, outcome)
+            lesson = (note or {}).get("lesson")
+            if lesson:
+                self.recorder.log_explanation(
+                    "process", f"Self-model: repaired my model of '{lesson['about']}' after it "
+                               f"{lesson['outcome']}; I will take more care with it.", run_id=rid)
+        except Exception:
+            pass                      # learning must never get in the way of answering
+
     async def _emit(self, event: dict):
         try:
             await self.emit(event)
@@ -126,6 +154,8 @@ class Orchestrator:
         await self._emit({"type": "transcript", "role": "user", "text": text, "lang": lang})
         await self._emit({"type": "state", "state": "thinking", "lang": lang})
 
+        if self.selfmodel is not None:
+            self.selfmodel.enabled = self._self_learning()      # the Settings switch applies at once
         intent = parse_intent(text, lang=lang)
         skill = REGISTRY.get(intent.name)
         risk = self.permissions.risk_of(skill.category, text) if skill else 0.0
@@ -151,6 +181,7 @@ class Orchestrator:
         except asyncio.CancelledError:
             self.recorder.end_run(rid, "cancelled", summary="interrupted by the user")
             await self._run_blocking(self.control.note_outcome, "interrupted", risk, sentiment)
+            await self._learn(intent.name, lang, "interrupted", rid)
             raise
         except Exception as e:  # never crash the bus
             self.recorder.end_run(rid, "failed", error=repr(e))
@@ -160,7 +191,8 @@ class Orchestrator:
             outcome = "failed"
         # update the drive layer's disposition from how this interaction went
         drive_state = await self._run_blocking(self.control.note_outcome, outcome, risk, sentiment)
-        await self._emit({"type": "control", "state": drive_state})
+        await self._learn(intent.name, lang, outcome, rid)
+        await self._emit({"type": "control", "state": drive_state, "self": self.self_summary()})
 
         self.history.append({"role": "assistant", "text": reply})
         self.history[:] = self.history[-24:]
@@ -211,6 +243,8 @@ class Orchestrator:
     async def _do_chat(self, text, lang, control, rid) -> Tuple[str, str]:
         """Return (full reply for the transcript, text that still needs to be spoken)."""
         system = _load_prompt(lang)
+        if self.selfmodel is not None:
+            system += "\n\n" + self.selfmodel.prompt_context(lang)
         if control.style_directive:
             system += "\n\nSTYLE: " + control.style_directive
         history = list(self.history[:-1])  # the current user turn is passed separately

@@ -63,7 +63,8 @@ const safeGraphics = safeForced || fs.existsSync(SAFE_FLAG);
 const state = { pid: process.pid, startedAt: Date.now(), electron: process.versions.electron,
                 platform: process.platform, safeGraphics, loaded: false, visible: false };
 
-function writeState(extra) {
+let stateRetry = null;
+function writeState(extra, attempt) {
   Object.assign(state, extra || {});
   if (win && !win.isDestroyed()) { state.visible = win.isVisible(); state.bounds = win.getBounds(); }
   else state.visible = false;
@@ -71,8 +72,15 @@ function writeState(extra) {
   try {
     fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(state));
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
-  } catch (e) { log('could not write overlay.json: ' + e.message); }
+  } catch (e) {
+    // On Windows the rename fails while another program (START's launcher) has the file open
+    // for a moment. The state must not be lost, so try again shortly.
+    const n = attempt || 0;
+    if (n < 6) { clearTimeout(stateRetry); stateRetry = setTimeout(() => writeState(null, n + 1), 250); }
+    else log('could not write overlay.json: ' + e.message);
+  }
 }
+setInterval(() => writeState(), 10000).unref();     // heartbeat: the file always reflects the present
 
 process.on('uncaughtException', (err) => {
   log('FATAL uncaught exception: ' + ((err && err.stack) || err));

@@ -321,6 +321,7 @@ def test_supervisor_flags_a_crash_loop_and_honours_quit():
             assert child.next_try > time.time(), "a crash loop must back off, not spin"
             # "Quit JARVIS" in the overlay: exit code 42 means stop everything, do not restart
             child.next_try = time.time() + 3600
+            sup._overlay_ready = lambda: True           # this test is about the exit code, not the runtime
             overlay = _child(sup, "overlay", f"import sys; sys.exit({common.QUIT_EXIT_CODE})")
             assert sup.step() is True
             overlay.proc.wait(timeout=20)
@@ -335,6 +336,17 @@ def test_supervisor_never_uses_npx_and_waits_for_the_runtime():
         assert os.path.isabs(cmd[0]) and os.path.isfile(cmd[0]) and "npx" not in " ".join(cmd).lower()
         assert cmd[-1] == ROOT
     assert service.backend_command()[1:] == ["-m", "agent.server"]
+    # while the runtime is missing the overlay is simply not started (the repair runs instead)
+    with Sandbox():
+        sup = service.Supervisor(with_overlay=True, quiet=True)
+        sup.children.pop("backend")
+        calls = []
+        sup._overlay_ready = lambda: calls.append(1) or False
+        try:
+            assert sup.step() is True
+            assert calls and sup.children["overlay"].proc is None and sup.children["overlay"].starts == 0
+        finally:
+            sup.stop_all()
 
 
 # ----------------------------------------------------------------- launcher

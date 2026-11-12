@@ -305,6 +305,8 @@ class JarvisServer:
         self.config = load_config(self.config_path)
         self.orch.config = self.config
         self.orch.default_lang = self.config.get("language", {}).get("default", "en")
+        if self.orch.selfmodel is not None:
+            self.orch.selfmodel.enabled = self.orch._self_learning()
         self.permissions.reload()
         if self.voice is not None:
             try:
@@ -455,7 +457,8 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
         await ws.accept()
         srv.manager.add(ws)
         await srv.manager.send(ws, {"type": "hello", "config": srv.client_config(),
-                                    "status": srv.status(), "state": "idle"})
+                                    "status": srv.status(), "state": "idle",
+                                    "self": srv.orch.self_summary()})
         try:
             while True:
                 raw = await ws.receive_text()

@@ -47,6 +47,33 @@ SHAPES = {
 
 def _rules():
     return [
+        # ---------------- the self core (core/self_model.py) ----------------
+        ("self_forget", [
+            r"\b(forget|erase|wipe|clear|reset)\b.*\b(what|everything|all)\b.*\b(learn(ed|t)|know|remember(ed)?|taught)\b",
+            r"\b(forget|erase|wipe|clear|reset)\b.*\b(your|the)\s+(memory|memories|self[- ]?model)\b",
+            r"(배운|학습한|기억한|기억해\s*둔)\s*(것|내용).*(잊어|지워|삭제|초기화)",
+            r"(기억|메모리).*(초기화|모두\s*지워|전부\s*지워|다\s*지워)",
+        ]),
+        ("self_remember", [
+            r"^(please\s+)?remember\s+(that\s+)?(?P<fact>.+)$",
+            r"^(from now on|in future|going forward)[, ]+(?P<fact>.+)$",
+            r"^(?P<fact>(call me (?!a\b|an\b|the\b|back\b|later\b|when\b)|my name is |i am called ).+)$",
+            r"^(?P<fact>.+?)\s*(라고|이라고|을|를)?\s*기억해\s*(줘|둬|주세요|두세요)?$",
+            r"^(?P<fact>내\s*이름은\s*.+)$",
+            r"^(?P<fact>(나를|저를)\s*.+(이?라고)\s*불러.*)$",
+            r"^(앞으로는?|이제부터)\s*(?P<fact>.+)$",
+        ]),
+        ("self_describe", [
+            r"\bwho\s+are\s+you\b", r"^what\s+are\s+you\??$", r"\btell me about yourself\b",
+            r"\b(introduce|describe)\s+yourself\b",
+            r"\bwhat('s| is)\s+your\s+(purpose|goal|directive|mission|prime directive)\b",
+            r"\bwhat\s+(have|did)\s+you\s+learn(ed|t)?\b",
+            r"\bwhat\s+do\s+you\s+(know|remember)\s+about\s+(me|yourself)\b",
+            r"\bare\s+you\s+loyal\b", r"\bwho\s+do\s+you\s+serve\b",
+            r"(너는|넌|당신은|자비스는?)\s*(누구|뭐야|무엇)", r"자기\s*소개",
+            r"(너의?|네|당신의?|자비스의?)\s*(목적|목표|사명|지침)",
+            r"(뭘|무엇을|뭐를)\s*(배웠|학습했|기억하)", r"나에\s*대해\s*(뭘|무엇을|뭐를)?\s*(알고|기억)",
+        ]),
         # ---------------- 3D project space (requirements 5, 17, 18) ----------------
         ("open_space3d", [
             r"\b(open|launch|start|show|bring up|enter)\b.*\b(3d|three.?d|project space|modell?ing|workspace)\b",
@@ -150,7 +177,8 @@ _NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "stop_music", "open_space3d", "clos
                    "clone_object", "system_info", "sleep_assistant", "delete_object",
                    "save_project", "export_model", "neural_view", "wallpaper_on", "wallpaper_off",
                    "open_jarvis_settings", "screenshot", "show_desktop", "toggle_gesture",
-                   "list_devices", "settings", "window_minimize", "window_maximize"}
+                   "list_devices", "settings", "window_minimize", "window_maximize",
+                   "self_describe", "self_forget"}
 
 
 def _clean_app(name: str) -> str:
@@ -186,6 +214,18 @@ def parse_intent(text: str, lang: Optional[str] = None) -> Intent:
                 mt = pat.search(t)
                 if mt and mt.groupdict().get("text"):
                     args["text"] = mt.group("text").strip()
+            if name == "self_remember":
+                # keep the user's own words and casing for what is to be remembered
+                mt = pat.search(t)
+                if mt and mt.groupdict().get("fact"):
+                    args["fact"] = mt.group("fact").strip()
+            if name == "self_describe":
+                if re.search(r"learn|know|remember|배웠|학습|알고|기억", tl):
+                    args["about"] = "learned"
+                elif re.search(r"purpose|goal|directive|mission|loyal|serve|목적|목표|사명|지침", tl):
+                    args["about"] = "purpose"
+                else:
+                    args["about"] = "self"
             if name == "toggle_gesture":
                 args["state"] = "off" if re.search(r"\boff\b|꺼|끄기|비활성", tl) else "on"
             conf = 0.8 if args or name in _NO_ARG_INTENTS else 0.6

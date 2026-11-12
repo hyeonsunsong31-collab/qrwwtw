@@ -214,13 +214,15 @@ function maybeSwitchLang(lang) {
     if (announceVisible()) announceText();
   }
 }
-let disposition = null;
+let disposition = null, selfSummary = null;
 function renderDisposition(state) {
   disposition = state || disposition;
   const el = document.getElementById("disposition");
   if (!el || !disposition) return;
   el.textContent = t("mood." + (disposition.mood || "calm"));
-  el.title = `${disposition.purpose || ""}\n${disposition.drive || ""}`.trim();
+  // tooltip: the fixed directive + what the self-model has learned, then the drive layer
+  const self = selfSummary ? (selfSummary[getLang()] || selfSummary.en || "") : "";
+  el.title = `${self}\n${disposition.purpose || ""}\n${disposition.drive || ""}`.trim();
   el.classList.remove("hidden");
   if (ring) ring.title = `${disposition.label || "JARVIS"} — ${disposition.drive || ""}`;
 }
@@ -233,6 +235,7 @@ function renderStatus() {
 
 bus.on("hello", (m) => {
   cfg = m.config || {}; status = m.status || {};
+  if (m.self) selfSummary = m.self;
   backendHasVoice = !!status.voice;
   setLang((cfg.language && cfg.language.default) || "en");
   buttons.rerenderLabels();
@@ -260,7 +263,10 @@ bus.on("say", (m) => {
 });
 bus.on("stop_tts", stopSpeaking);
 bus.on("wake_response", () => { buttons.reactor.classList.add("awake"); chat.show(); });
-bus.on("control", (m) => { if (m.state) renderDisposition(m.state); });
+bus.on("control", (m) => {
+  if (m.self) selfSummary = m.self;
+  if (m.state || m.self) renderDisposition(m.state);
+});
 bus.on("options", (m) => chat.setOptions(m.options || [], m.suggestions || []));
 bus.on("ui", (m) => handleUi(m.action, m.args || {}));
 bus.on("permission_request", permissionToast);
