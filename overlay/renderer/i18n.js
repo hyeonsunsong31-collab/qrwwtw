@@ -11,6 +11,8 @@ export const STRINGS = {
     settings_title: "JARVIS Settings", settings_general: "General",
     settings_permissions: "Permissions", saved: "Saved",
     restart_note: "applies after JARVIS restarts", llm_offline: "language engine offline",
+    announce_online: "online", announce_starting: "starting up · connecting to the neural core",
+    announce_hint: "Say \"wake up Jarvis\" · click WAKE · Ctrl+Alt+J",
     mood: { calm: "steady", attentive: "attentive", rebuilding: "rebuilding trust", engaged: "engaged" },
     feat: {
       space3d: "3D Space", addobj: "Add Object", clone: "Clone", delete: "Delete",
@@ -19,6 +21,7 @@ export const STRINGS = {
       search: "Find Files", openapp: "Open App", screenshot: "Screenshot", web: "Web Search",
       volume: "Volume", devices: "Devices", settings: "Windows Settings",
       jsettings: "JARVIS Settings", chat: "Chat", sleep: "Sleep",
+      aboutme: "About JARVIS", remember: "Remember…",
     },
   },
   ko: {
@@ -30,6 +33,8 @@ export const STRINGS = {
     perm_title: "권한 필요", allow: "허용", deny: "거부",
     settings_title: "자비스 설정", settings_general: "일반", settings_permissions: "권한",
     saved: "저장됨", restart_note: "자비스를 다시 시작하면 적용됩니다", llm_offline: "언어 엔진 오프라인",
+    announce_online: "온라인", announce_starting: "시작하는 중 · 신경 코어에 연결하고 있습니다",
+    announce_hint: "\"wake up Jarvis\"라고 말하기 · 깨우기 버튼 · Ctrl+Alt+J",
     mood: { calm: "안정", attentive: "주의 깊음", rebuilding: "신뢰 회복 중", engaged: "몰입" },
     feat: {
       space3d: "3D 공간", addobj: "오브젝트 추가", clone: "복제", delete: "삭제",
@@ -38,6 +43,7 @@ export const STRINGS = {
       search: "파일 검색", openapp: "앱 열기", screenshot: "스크린샷", web: "웹 검색",
       volume: "볼륨", devices: "장치", settings: "Windows 설정",
       jsettings: "자비스 설정", chat: "채팅", sleep: "대기 모드",
+      aboutme: "자비스 소개", remember: "기억시키기",
     },
   },
 };

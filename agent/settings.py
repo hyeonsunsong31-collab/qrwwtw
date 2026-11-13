@@ -39,6 +39,7 @@ SCHEMA: Dict[str, dict] = {
                                   "label": "Language model", "restart": True},
     "llm.temperature":           {"type": "float", "min": 0.0, "max": 1.5, "step": 0.05,
                                   "label": "Creativity"},
+    "self_model.enabled":        {"type": "bool", "label": "Self-learning (remember what I learn)"},
 }
 
 PERMISSION_CHOICES = ["allow", "ask", "deny"]

@@ -38,6 +38,9 @@ OK: Dict[str, Reply] = {
     "wallpaper_off": "원래 바탕화면으로 되돌리겠습니다, sir.",
     "open_jarvis_settings": "제 설정 화면입니다, sir.",
     "sleep_assistant": "알겠습니다, sir. 대기하겠습니다.",
+    "self_describe": lambda r: _d(r, "speak_ko"),
+    "self_remember": lambda r: _d(r, "speak_ko"),
+    "self_forget": lambda r: _d(r, "speak_ko"),
     "play_music": lambda r: (f"{_d(r, 'title')}을(를) 재생합니다, sir." if _d(r, "mode") == "stream"
                              else f"{_d(r, 'query')} 플레이어를 열겠습니다, sir."),
     "stop_music": "음악을 멈췄습니다, sir.",
@@ -72,6 +75,9 @@ OK: Dict[str, Reply] = {
 
 FAIL_DEFAULT = "죄송합니다, sir. 그 작업을 완료하지 못했습니다."
 FAIL: Dict[str, Reply] = {
+    "self_describe": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
+    "self_remember": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
+    "self_forget": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
     "open_app": "이 PC에서 그 앱을 찾지 못했습니다, sir.",
     "close_app": "그 앱은 실행 중이 아닌 것 같습니다, sir.",
     "play_music": "음악을 재생하지 못했습니다, sir.",

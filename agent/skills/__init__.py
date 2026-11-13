@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, NamedTuple
 
-from . import files, apps, system, browser, media, music, devices, windows
+from . import files, apps, system, browser, media, music, devices, windows, selfcore
 
 
 class Skill(NamedTuple):
@@ -49,6 +49,11 @@ REGISTRY: Dict[str, Skill] = {
     "wallpaper_off":  Skill(_ui("wallpaper_off", "Restoring your usual wallpaper, sir."), "window_control", "settings"),
     "open_jarvis_settings": Skill(_ui("open_settings_panel", "Here are my settings, sir."), "read_system_info", "chat"),
     "sleep_assistant": Skill(_ui("sleep", "Very good, sir. I'll stand by."), "read_system_info", "chat"),
+
+    # ---- the self core: purpose, what it has learned, teaching and forgetting ----
+    "self_describe":  Skill(_call(selfcore.describe), "jarvis_data", "chat"),
+    "self_remember":  Skill(_call(selfcore.remember), "jarvis_data", "chat"),
+    "self_forget":    Skill(_call(selfcore.forget), "jarvis_data", "chat"),
 
     # ---- music / media ----
     "play_music":     Skill(_call(music.play_music), "play_music", "play_music"),

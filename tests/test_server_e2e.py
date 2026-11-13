@@ -107,7 +107,7 @@ async def scenario(h: Harness):
 
     # ---------------- HTTP access control
     async with httpx.AsyncClient() as c:
-        assert (await c.get(h.base + "/health")).json() == {"ok": True, "version": "1.2.0"}
+        assert (await c.get(h.base + "/health")).json() == {"ok": True, "version": "1.3.0"}
         assert (await c.get(h.base + "/status")).status_code == 401
         st = (await c.get(h.base + "/status", headers={"X-Jarvis-Token": token})).json()
         assert st["neurons_active"] >= 20000 and st["neurons_nominal"] == 200_000_000_000

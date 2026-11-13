@@ -64,7 +64,7 @@ body { font-family: var(--font); color: var(--cyan-soft);
 .ring-bg { fill: none; stroke: rgba(56,225,255,.12); stroke-width: 3; }
 .ring-fg { fill: none; stroke: var(--cyan); stroke-width: 3; stroke-linecap: round;
   stroke-dasharray: 60 260; transform-origin: 60px 60px; transition: stroke .3s; }
-.ring-core { fill: rgba(56,225,255,.08); stroke: var(--cyan-soft); stroke-width: 1.5; }
+.ring-core { fill: rgba(56,225,255,.08); stroke: var(--cyan-soft); stroke-width: 1.5; transform-origin: 60px 60px; }
 #state-ring[data-state="idle"] .ring-fg { animation: spin 14s linear infinite; }
 #state-ring[data-state="listening"] .ring-fg { stroke: var(--amber); animation: spin 3.2s linear infinite; }
 #state-ring[data-state="thinking"] .ring-fg { animation: spin 1.1s linear infinite; }
@@ -117,7 +117,7 @@ body { font-family: var(--font); color: var(--cyan-soft);
 /* Feature dock */
 #feature-dock { left: 50%; bottom: 100px; transform: translateX(-50%);
   display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px;
-  padding: 12px; width: min(760px, 92vw); max-height: 42vh; overflow-y: auto; }
+  padding: 12px; width: min(760px, 92vw); max-height: 42vh; overflow-y: auto; overflow-x: hidden; }
 .feat { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px;
   border: 1px solid var(--line); border-radius: 9px; background: rgba(6,24,34,.4); color: var(--cyan-soft);
   cursor: pointer; font-size: 10.5px; letter-spacing: .08em; text-align: center; transition: .2s; }
@@ -133,7 +133,8 @@ body { font-family: var(--font); color: var(--cyan-soft);
 .r-mid { fill: rgba(56,225,255,.05); stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 6 5;
   transform-origin: 50px 50px; animation: spin 10s linear infinite; }
 .r-tri polygon { fill: rgba(56,225,255,.14); stroke: var(--cyan-soft); stroke-width: 1.5; }
-.r-core { fill: var(--cyan); filter: drop-shadow(0 0 8px var(--cyan)); animation: pulse 2.4s ease-in-out infinite; }
+.r-core { fill: var(--cyan); filter: drop-shadow(0 0 8px var(--cyan)); transform-origin: 50px 50px;
+  animation: pulse 2.4s ease-in-out infinite; }
 #reactor:hover .r-core { animation-duration: .8s; }
 .reactor-label { position: absolute; left: 0; right: 0; bottom: -4px; text-align: center; font-size: 9px;
   letter-spacing: .3em; color: var(--cyan-soft); }
@@ -196,3 +197,28 @@ body { font-family: var(--font); color: var(--cyan-soft);
 /* Drive-layer disposition chip (motivational core) */
 .badge.disposition { border-color: rgba(138,243,255,.5); color: var(--cyan-soft); cursor: help;
   text-transform: lowercase; letter-spacing: .08em; }
+
+/* Start-up banner: "J.A.R.V.I.S online" in the middle of the screen, then it fades away.
+   Never interactive, so it cannot get in the way of a click. */
+#announce { position: absolute; z-index: 6; left: 50%; top: 34%; transform: translate(-50%, -50%);
+  min-width: 460px; max-width: 86vw; padding: 26px 44px 22px; text-align: center; pointer-events: none;
+  background: var(--glass-strong); border: 1px solid var(--cyan); border-radius: 14px;
+  box-shadow: 0 0 60px rgba(56,225,255,.45), inset 0 0 30px rgba(56,225,255,.12);
+  backdrop-filter: blur(12px); animation: announce-in .6s cubic-bezier(.2,.9,.3,1.2) both; }
+#announce.leaving { animation: announce-out .7s ease both; }
+#announce::before, #announce::after { content: ""; position: absolute; left: 14px; right: 14px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent); }
+#announce::before { top: 8px; } #announce::after { bottom: 8px; }
+.an-title { font-size: 44px; font-weight: 700; letter-spacing: .42em; padding-left: .42em; color: #fff;
+  text-shadow: 0 0 22px var(--cyan-glow), 0 0 4px #fff; }
+.an-status { margin-top: 8px; font-size: 15px; letter-spacing: .34em; text-transform: uppercase; color: var(--amber); }
+.an-status.ok { color: var(--cyan); text-shadow: 0 0 12px var(--cyan-glow); }
+.an-hint { margin-top: 14px; font-size: 12.5px; letter-spacing: .12em; color: #d9fbff; opacity: .9; }
+@keyframes announce-in { from { opacity: 0; transform: translate(-50%, -50%) scale(.82); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes announce-out { to { opacity: 0; transform: translate(-50%, -60%) scale(.96); } }
+
+/* ...and the WAKE button pulses while the banner is up, so the eye finds it. */
+#reactor.attention::after { content: ""; position: absolute; inset: -6px; border-radius: 50%;
+  border: 2px solid var(--cyan); animation: reactor-ping 1.6s ease-out infinite; pointer-events: none; }
+@keyframes reactor-ping { from { transform: scale(.8); opacity: .9; } to { transform: scale(2.1); opacity: 0; } }

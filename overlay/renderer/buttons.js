@@ -28,6 +28,8 @@ const FEATURES = [
   { id: "winsettings", ic: "⚙️", key: "feat.settings", cmd: "open settings" },
   { id: "jsettings", ic: "🛠", key: "feat.jsettings", act: "open_settings" },
   { id: "chat",      ic: "💬", key: "feat.chat",      act: "toggle_chat" },
+  { id: "aboutme",   ic: "🪞", key: "feat.aboutme",   cmd: "who are you" },
+  { id: "remember",  ic: "🧷", key: "feat.remember",  prefill: "remember that " },
   { id: "sleep",     ic: "🌙", key: "feat.sleep",     cmd: "go to sleep" },
 ];
 

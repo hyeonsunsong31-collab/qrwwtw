@@ -19,7 +19,9 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-GREEN, YELLOW, RED, RESET = "\033[92m", "\033[93m", "\033[91m", "\033[0m"
+# colours only on a real terminal (the installer pipes this output; cmd would print the codes)
+_TTY = bool(getattr(sys.stdout, "isatty", lambda: False)()) and os.name != "nt"
+GREEN, YELLOW, RED, RESET = ("\033[92m", "\033[93m", "\033[91m", "\033[0m") if _TTY else ("", "", "", "")
 def ok(m): print(f"  {GREEN}OK{RESET}   {m}")
 def warn(m): print(f"  {YELLOW}--{RESET}   {m}")
 def bad(m): print(f"  {RED}XX{RESET}   {m}")
@@ -46,11 +48,13 @@ def check_config():
 
 def check_imports():
     head("Module imports")
-    mods = ["core.synaptic_perceptron", "core.brain_mesh", "core.control_layer", "core.drive", "core.scale",
+    mods = ["core.synaptic_perceptron", "core.brain_mesh", "core.control_layer", "core.drive",
+            "core.self_model", "core.scale",
             "recorder.recorder", "agent.nlu", "agent.permissions", "agent.llm_ollama",
             "agent.settings", "agent.replies_ko", "agent.orchestrator", "agent.skills",
-            "agent.skills.windows", "agent.server", "voice.wakeword", "voice.stt", "voice.tts",
-            "voice.interrupt", "voice.engine", "boot.jarvis_service"]
+            "agent.skills.windows", "agent.skills.selfcore", "agent.server", "voice.wakeword",
+            "voice.stt", "voice.tts", "voice.interrupt", "voice.engine",
+            "boot.common", "boot.overlay_runtime", "boot.jarvis_service", "boot.launcher"]
     good = True
     for m in mods:
         try:
@@ -85,9 +89,27 @@ def check_core():
             r = Recorder(d); cid = r.log_command("hi"); rid = r.start_run(cid, "chat")
             r.end_run(rid, "success"); r.checkpoint({"x": 1})
         ok("recorder: command/run/checkpoint cycle works")
+        from core.self_model import SelfModel, DIRECTIVE
+        with tempfile.TemporaryDirectory() as d:
+            me = SelfModel(state_dir=d)
+            me.observe("play_music", "en", "success"); me.teach("I prefer short answers")
+            assert me.directive == DIRECTIVE and me.identity()["interactions"] == 1
+        ok(f"self core: directive = {DIRECTIVE!r}; learning, teaching and persistence work")
         return True
     except Exception as e:
         import traceback; traceback.print_exc(); bad(f"core path failed: {e}"); return False
+
+
+def check_overlay_runtime():
+    head("Holographic overlay runtime (what START_JARVIS.bat needs to put JARVIS on screen)")
+    from boot import common, overlay_runtime
+    left = overlay_runtime.problems()
+    if left:
+        for p in left:
+            warn(p)
+        warn("START_JARVIS.bat / INSTALL_JARVIS.bat download whatever is missing (boot/overlay_runtime.py)")
+    else:
+        ok(f"Electron, three.js and MediaPipe are installed ({common.electron_exe()})")
 
 
 def check_optional():
@@ -120,6 +142,7 @@ def main():
     print("JARVIS health check")
     print("=" * 60)
     results = [check_config(), check_imports(), check_core()]
+    check_overlay_runtime()
     check_optional()
     head("Summary")
     if all(results):

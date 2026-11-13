@@ -38,6 +38,7 @@ import numpy as np
 
 from .brain_mesh import BrainMesh
 from .drive import DriveSystem
+from .self_model import SelfModel
 from .scale import resolve_scale
 
 SIGNALS = ["formality", "verbosity", "confidence", "persona_adherence", "warmth", "caution"]
@@ -125,6 +126,7 @@ class ControlLayer:
         self._P = rng.normal(0.0, 1.0, size=(self._th_dim, 8)).astype(np.float32)
         self.last_features: Optional[Features] = None
         self.drive = DriveSystem(state_dir=state_dir)   # motivational / homeostatic layer
+        self.selfmodel = SelfModel(state_dir=state_dir)  # fixed directive + learned self-model
         self.load()
 
     # ------------------------------------------------------------ priors #

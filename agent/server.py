@@ -7,7 +7,8 @@ travel the exact same path, so every feature works by voice OR text, on any scre
 
   ws://127.0.0.1:8765/ws?token=...   bidirectional event stream (JSON messages)
   GET /health                        public liveness probe ({"ok": true} only)
-  GET /status        (token)         LLM / voice / neural-mesh status
+  GET /status        (token)         LLM / voice / neural-mesh status, connected overlays
+  POST /announce     (token)         ask the overlay to show itself (START_JARVIS.bat)
   GET /neural/points (token)         downsampled 3D point cloud of the live brain mesh
   GET /history       (token)         recent records for the History view
 
@@ -29,6 +30,8 @@ import json
 import os
 import re
 import secrets
+import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -43,7 +46,7 @@ from .orchestrator import Orchestrator
 from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -148,12 +151,17 @@ class JarvisServer:
         self._pending_perms: Dict[str, asyncio.Future] = {}
         self._current: Optional[asyncio.Task] = None
         self.voice = None  # set by attach_voice()
+        self.voice_state = "off"          # off | loading | online | unavailable | failed
+        self.started_at = time.time()
 
     # ------------------------------------------------------------- status #
     def status(self) -> dict:
-        return {"ok": True, "version": VERSION,
+        return {"ok": True, "version": VERSION, "pid": os.getpid(),
+                "uptime": round(time.time() - self.started_at, 1),
+                "overlay_clients": len(self.manager.active),
                 "llm": self.llm.model_name(), "llm_online": self.llm.online(),
-                "voice": bool(self.voice), "listening": bool(self.voice and self.voice.listening),
+                "voice": bool(self.voice), "voice_state": self.voice_state,
+                "listening": bool(self.voice and self.voice.listening),
                 "neurons_active": int(self.mesh.N),
                 "neurons_nominal": int(self.mesh.scale.nominal_neurons),
                 "synapses_active": int(self.mesh.E)}
@@ -180,6 +188,12 @@ class JarvisServer:
 
     def attach_voice(self, engine):
         self.voice = engine
+        self.voice_state = "online"
+
+    async def announce(self, reason: str = "launcher") -> int:
+        """Ask every connected overlay to show its 'JARVIS online' banner. Returns how many."""
+        await self.manager.broadcast({"type": "ui", "action": "announce", "args": {"reason": reason}})
+        return len(self.manager.active)
 
     async def notify(self, text: str, lang: str = "en"):
         """Speak + show a short assistant line that isn't the reply to a command."""
@@ -291,6 +305,8 @@ class JarvisServer:
         self.config = load_config(self.config_path)
         self.orch.config = self.config
         self.orch.default_lang = self.config.get("language", {}).get("default", "en")
+        if self.orch.selfmodel is not None:
+            self.orch.selfmodel.enabled = self.orch._self_learning()
         self.permissions.reload()
         if self.voice is not None:
             try:
@@ -359,24 +375,41 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
 
     srv = server or JarvisServer()
 
+    async def start_voice_engine():
+        """Load the speech models off the event loop. They can take from seconds to minutes
+        (first run, slow disk), and the command bus must not wait for them: the overlay
+        connects -- and typed commands work -- as soon as the server is up."""
+        srv.voice_state = "loading"
+        try:
+            from voice.engine import VoiceEngine
+            ve = await asyncio.to_thread(
+                lambda: VoiceEngine(srv.config, on_wake=srv.wake,
+                                    on_command=lambda text: srv.submit_command(text, source="voice"),
+                                    on_interrupt=lambda: srv.interrupt(stop_speech=True),
+                                    on_state=srv.on_voice_state, root=ROOT))
+            if ve.available:
+                srv.attach_voice(ve)
+                asyncio.create_task(ve.run())
+                print("[jarvis] voice engine online (wake word + STT + British TTS)", flush=True)
+            else:
+                srv.voice_state = "unavailable"
+                print("[jarvis] voice engine offline (audio libraries missing) - text still works", flush=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            srv.voice_state = "failed"
+            print(f"[jarvis] voice engine not started: {e!r}", flush=True)
+        await srv.manager.broadcast({"type": "status", "status": srv.status()})
+
     @asynccontextmanager
     async def lifespan(app):
+        voice_task = None
         if start_voice and srv.config.get("voice", {}).get("enabled", True):
-            try:
-                from voice.engine import VoiceEngine
-                ve = VoiceEngine(srv.config, on_wake=srv.wake,
-                                 on_command=lambda text: srv.submit_command(text, source="voice"),
-                                 on_interrupt=lambda: srv.interrupt(stop_speech=True),
-                                 on_state=srv.on_voice_state, root=ROOT)
-                if ve.available:
-                    srv.attach_voice(ve)
-                    asyncio.create_task(ve.run())
-                    print("[jarvis] voice engine online (wake word + STT + British TTS)")
-                else:
-                    print("[jarvis] voice engine offline (audio libraries missing) - text still works")
-            except Exception as e:
-                print(f"[jarvis] voice engine not started: {e!r}")
+            voice_task = asyncio.create_task(start_voice_engine())
+        print(f"[jarvis] ready ({time.time() - srv.started_at:.1f}s)", flush=True)
         yield
+        if voice_task is not None and not voice_task.done():
+            voice_task.cancel()
         if srv.voice is not None:
             srv.voice.stop()
 
@@ -395,6 +428,11 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
     async def status(request: Request):
         require_token(request)
         return srv.status()
+
+    @app.post("/announce")
+    async def announce(request: Request):
+        require_token(request)
+        return {"ok": True, "clients": await srv.announce("launcher")}
 
     @app.get("/neural/points")
     async def neural_points(request: Request, max_points: int = 3000):
@@ -419,7 +457,8 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
         await ws.accept()
         srv.manager.add(ws)
         await srv.manager.send(ws, {"type": "hello", "config": srv.client_config(),
-                                    "status": srv.status(), "state": "idle"})
+                                    "status": srv.status(), "state": "idle",
+                                    "self": srv.orch.self_summary()})
         try:
             while True:
                 raw = await ws.receive_text()
@@ -440,8 +479,19 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
     return app
 
 
+def _ensure_stdio():
+    """pythonw.exe and detached starts give a process no stdout/stderr at all (None).
+    uvicorn's logging set-up calls sys.stdout.isatty() and would crash before the server
+    ever starts, without a trace. Give such a process the null device instead."""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name, None) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+
+
 def main():
+    _ensure_stdio()
     import uvicorn
+    print(f"[jarvis] backend {VERSION} starting (pid {os.getpid()}, python {sys.version.split()[0]})", flush=True)
     cfg = load_config()
     srv = JarvisServer(cfg)
     app = create_app(srv)
@@ -451,8 +501,8 @@ def main():
         print("[jarvis] refusing to bind the command bus to a non-loopback address; using 127.0.0.1")
         host = "127.0.0.1"
     port = int(s.get("port", 8765))
-    print(f"[jarvis] command bus on ws://{host}:{port}/ws (token in data/session.token)")
-    uvicorn.run(app, host=host, port=port, log_level="warning",
+    print(f"[jarvis] command bus on ws://{host}:{port}/ws (token in data/session.token)", flush=True)
+    uvicorn.run(app, host=host, port=port, log_level="warning", use_colors=False,
                 ws_max_size=MAX_EXPORT_BYTES * 2)
 
 
