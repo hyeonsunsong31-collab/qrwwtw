@@ -38,15 +38,14 @@ from datetime import datetime
 from typing import Dict, Optional, Set
 
 from core.control_layer import ControlLayer
-from core.brain_mesh import BrainMesh
-from core.scale import resolve_scale
+from core.brain_mesh import build_mesh
 from recorder import Recorder
 from . import settings as settings_mod
 from .orchestrator import Orchestrator
 from .permissions import PermissionManager
-from .llm_ollama import ResilientLLM
+from .llm_ollama import ResilientLLM, keep_alive_value
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -135,15 +134,23 @@ class JarvisServer:
         self.manager = ConnectionManager()
         self.recorder = Recorder(data_dir)
 
-        scale = resolve_scale(self.config.get("neural_core", {}).get("active_neurons", "auto"))
-        self.mesh = BrainMesh(scale)
-        self.control = ControlLayer(mesh=self.mesh, state_dir=os.path.join(data_dir, "brain"))
+        nc = self.config.get("neural_core", {})
+        settle = int(nc.get("settle_steps", 10))
+        # sized by RAM AND by a per-command time budget: the mesh settles on every command
+        self.mesh = build_mesh(nc.get("active_neurons", "auto"),
+                               latency_budget_ms=float(nc.get("latency_budget_ms", 60) or 0) or None,
+                               settle_steps=settle, log=lambda m: print("[jarvis] " + m, flush=True),
+                               remember=os.path.join(data_dir, "brain", "mesh_size.json"))
+        self.control = ControlLayer(mesh=self.mesh, settle_steps=settle,
+                                    state_dir=os.path.join(data_dir, "brain"))
         self.permissions = PermissionManager(config_path=permissions_path,
                                              recorder=self.recorder, asker=self._ask_user)
         llm_cfg = self.config.get("llm", {})
         self.llm = ResilientLLM(host=llm_cfg.get("host", "http://127.0.0.1:11434"),
                                 model=llm_cfg.get("model", "auto"),
-                                candidates=llm_cfg.get("model_candidates", {}))
+                                candidates=llm_cfg.get("model_candidates", {}),
+                                keep_alive=llm_cfg.get("keep_alive", "always"),
+                                num_ctx=int(llm_cfg.get("context_tokens", 4096)))
         self.orch = Orchestrator(self.config, self.llm, recorder=self.recorder,
                                  control=self.control, permissions=self.permissions,
                                  emit=self._emit)
@@ -160,6 +167,10 @@ class JarvisServer:
                 "uptime": round(time.time() - self.started_at, 1),
                 "overlay_clients": len(self.manager.active),
                 "llm": self.llm.model_name(), "llm_online": self.llm.online(),
+                "llm_state": self.llm.state, "llm_error": self.llm.error or None,
+                "llm_tokens_per_s": self.llm.stats.get("tokens_per_s"),
+                "llm_gpu": self.llm.stats.get("gpu"), "llm_load_seconds": self.llm.stats.get("load_seconds"),
+                "neural_settle_ms": getattr(self.mesh, "settle_ms", None),
                 "voice": bool(self.voice), "voice_state": self.voice_state,
                 "listening": bool(self.voice and self.voice.listening),
                 "neurons_active": int(self.mesh.N),
@@ -305,6 +316,7 @@ class JarvisServer:
         self.config = load_config(self.config_path)
         self.orch.config = self.config
         self.orch.default_lang = self.config.get("language", {}).get("default", "en")
+        self.llm.ollama.keep_alive = keep_alive_value(self.config.get("llm", {}).get("keep_alive", "always"))
         if self.orch.selfmodel is not None:
             self.orch.selfmodel.enabled = self.orch._self_learning()
         self.permissions.reload()
@@ -369,7 +381,7 @@ class JarvisServer:
 # --------------------------------------------------------------------------- #
 # FastAPI app factory (web deps imported lazily so the module is testable without them)
 # --------------------------------------------------------------------------- #
-def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
+def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, warm_llm: bool = True):
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
     from fastapi.responses import JSONResponse
 
@@ -382,11 +394,25 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
         srv.voice_state = "loading"
         try:
             from voice.engine import VoiceEngine
-            ve = await asyncio.to_thread(
-                lambda: VoiceEngine(srv.config, on_wake=srv.wake,
-                                    on_command=lambda text: srv.submit_command(text, source="voice"),
-                                    on_interrupt=lambda: srv.interrupt(stop_speech=True),
-                                    on_state=srv.on_voice_state, root=ROOT))
+            from agent.orchestrator import ACK
+
+            def make():
+                engine = VoiceEngine(srv.config, on_wake=srv.wake,
+                                     on_command=lambda text: srv.submit_command(text, source="voice"),
+                                     on_interrupt=lambda: srv.interrupt(stop_speech=True),
+                                     on_state=srv.on_voice_state, root=ROOT)
+                if engine.available:
+                    # warm the models up and pre-synthesise what JARVIS says most, so the wake
+                    # reply and the first command are as fast as every later one
+                    wake = srv.config.get("identity", {}).get("wake_response", "Jarvis at your service sir")
+                    t0 = time.time()
+                    done = engine.warm_up([(wake, "en"), (ACK["en"], "en"), ("Very good, sir.", "en"),
+                                           (ACK["ko"], "ko")])
+                    print(f"[jarvis] voice warm-up: speech recogniser {'ready' if done['stt'] else 'not warmed'}, "
+                          f"{done['phrases']} phrase(s) pre-synthesised ({time.time() - t0:.1f}s)", flush=True)
+                return engine
+
+            ve = await asyncio.to_thread(make)
             if ve.available:
                 srv.attach_voice(ve)
                 asyncio.create_task(ve.run())
@@ -401,15 +427,43 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True):
             print(f"[jarvis] voice engine not started: {e!r}", flush=True)
         await srv.manager.broadcast({"type": "status", "status": srv.status()})
 
+    async def keep_llm_warm():
+        """Load the language model as soon as Ollama is up, read the system prompt into its
+        cache, and load it again if Ollama restarts -- so a reply never waits for a cold model."""
+        last = None
+        while True:
+            try:
+                system = srv.orch.system_prompt(srv.orch.default_lang)
+                changed = await asyncio.to_thread(srv.llm.ensure_warm, system)
+                if srv.llm.state == "ready" and srv.llm.stats.get("warmed_at") and last != "ready":
+                    st = srv.llm.stats
+                    print(f"[jarvis] language model {st.get('model')} ready: loaded in {st.get('load_seconds')} s, "
+                          f"{st.get('tokens_per_s')} tokens/s, {int(100 * (st.get('gpu') or 0))}% on the GPU", flush=True)
+                elif srv.llm.state == "error" and last != "error":
+                    print(f"[jarvis] language model could not be loaded: {srv.llm.error}", flush=True)
+                if changed or srv.llm.state != last:
+                    last = srv.llm.state
+                    await srv.manager.broadcast({"type": "status", "status": srv.status()})
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"[jarvis] warm-up check failed: {e!r}", flush=True)
+            await asyncio.sleep(60 if srv.llm.state == "ready" else 5)
+
     @asynccontextmanager
     async def lifespan(app):
         voice_task = None
         if start_voice and srv.config.get("voice", {}).get("enabled", True):
             voice_task = asyncio.create_task(start_voice_engine())
+        warm_task = asyncio.create_task(keep_llm_warm()) if warm_llm else None
+        if warm_llm:
+            from agent.skills import warm_up as warm_skills
+            asyncio.get_running_loop().run_in_executor(None, warm_skills)
         print(f"[jarvis] ready ({time.time() - srv.started_at:.1f}s)", flush=True)
         yield
-        if voice_task is not None and not voice_task.done():
-            voice_task.cancel()
+        for task in (voice_task, warm_task):
+            if task is not None and not task.done():
+                task.cancel()
         if srv.voice is not None:
             srv.voice.stop()
 

@@ -46,6 +46,9 @@
 | `START_JARVIS_SAFE_GRAPHICS.bat` | HUD가 검게 나오거나 안 보일 때: 소프트웨어 렌더링으로 시작합니다. |
 | `UNINSTALL_JARVIS.bat` | 자동 시작 제거 + 종료 (폴더·기록은 유지) |
 
+**이전 버전에서 올린다면:** 새 ZIP을 기존 폴더 위에 풀고 **`INSTALL_JARVIS.bat`을 한 번** 실행하세요. 끝난 단계는 건너뛰고,
+이 PC에서 빠르게 도는 언어 모델을 골라 줍니다(v1.4의 응답 속도 개선 — 아래 "⚡ 응답 속도").
+
 **더블클릭했는데 아무것도 안 보인다면** → START 창에 나온 "What went wrong / What to do"를 따르거나
 **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**를 보세요. 전체 보고서는 `data\logs\diagnostics.txt`에 저장됩니다.
 
@@ -83,6 +86,25 @@ Windows 10(1809+)/11, 마이크·스피커(헤드셋이면 더 좋음)·웹캠(�
 
 ---
 
+## ⚡ 응답 속도 (v1.4)
+
+v1.3까지는 명령 하나마다 JARVIS 자체가 **약 4.5초**를 쓴 뒤에야 언어 모델에 질문을 넘겼고(16GB PC 기준, RAM이 많을수록 더 김),
+5분 쉬고 나면 언어 모델을 다시 올리느라 몇십 초를 더 기다렸으며, 매 턴 대화 전체를 다시 읽게 만들었습니다. v1.4에서:
+
+- **신경 메시**는 시작할 때 이 PC의 속도를 재서 명령당 60ms 안에 끝나는 크기로 돕니다(계산 결과는 이전과 동일, 같은 크기면 2배 빠름).
+  같은 PC에서 실제 명령 버스로 잰 "명령 → 첫 음성"은 **4.8초 → 0.07초**(언어 모델 시간 제외).
+- **언어 모델**은 시작할 때 미리 메모리에 올리고 시스템 프롬프트를 미리 읽혀 두며, 계속 올려 둡니다(`keep_alive`).
+  시스템 프롬프트와 대화 기록을 턴마다 그대로 두어 Ollama가 새 메시지만 읽습니다.
+- **모델 크기**: 그래픽카드에 다 들어가는 모델을 고릅니다(GPU 없음 → 3B). 이전 설치라면 `INSTALL_JARVIS.bat`을 한 번 더.
+- **말하기**: 다음 문장을 재생 중에 미리 합성하고, 긴 첫 문장은 첫 구절부터 말하며, 자주 하는 말은 미리 만들어 둡니다.
+- **듣기**: 짧은 명령에 맞춘 빠른 음성 인식 설정, 말이 끝났다고 보는 침묵 0.8초 → 0.6초(설정 가능).
+- 오래 걸리는 작업(노래 찾기·파일 검색)은 "Right away, sir."로 바로 답하고, HUD에 언어 모델 준비 상태가 보입니다.
+
+설정 패널: *Keep the language model loaded*(always/1h/15m/5m — 메모리를 돌려받고 싶다면), *Pause that ends a spoken command*.
+자세한 원인과 대책: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** "답이 늦게 나올 때".
+
+---
+
 ## 🧩 폴더 구조
 
 ```
@@ -96,7 +118,7 @@ overlay/   Electron 홀로그램 HUD · Three.js 3D 공간 · MediaPipe 손동�
 boot/      자동시작 등록 · 자가복구 슈퍼바이저(jarvis_service.py) · 시작 확인 런처(launcher.py) ·
            화면 표시부 런타임 설치(overlay_runtime.py) · 공용 도구(common.py)
 scripts/   setup_windows.ps1(설치) · healthcheck.py · mock_run.py · set_config.py
-tests/     단위 · 음성 엔진 · 실서버 E2E · 시작 체인(test_boot) · 자기 코어(test_self_model) 테스트
+tests/     단위 · 음성 엔진 · 실서버 E2E · 시작 체인(test_boot) · 자기 코어(test_self_model) · 응답 속도(test_speed) 테스트
 docs/      ARCHITECTURE · REQUIREMENTS_MAP · SECURITY · WAKE_WORD · DRIVE · SELF_MODEL · TROUBLESHOOTING
 INSTALL_JARVIS.bat · START_JARVIS.bat · STOP_JARVIS.bat · START_JARVIS_SAFE_GRAPHICS.bat · UNINSTALL_JARVIS.bat
 ```
@@ -117,6 +139,7 @@ python tests/test_server_e2e.py        # 실제 서버 + 토큰 WebSocket (fasta
 python tests/test_drive.py             # 동기 코어와 안전 불변식
 python tests/test_self_model.py        # 자기 코어: 고정 지침·학습·가르치기·잊기·안전 불변식·오케스트레이터 통합
 python tests/test_boot.py              # 시작 체인: 콘솔 없는 실행, 슈퍼바이저 재시작·크래시 루프·종료, 런타임 검증, 런처 진단
+python tests/test_speed.py             # 응답 속도: 메시 예산·동일성, 모델 유지·예열, 캐시 친화 프롬프트, 음성 파이프라인
 python scripts/mock_run.py             # Ollama·오디오 없이 명령 버스 전체 경로
 python boot/launcher.py --status       # 지금 무엇이 떠 있는지
 ```

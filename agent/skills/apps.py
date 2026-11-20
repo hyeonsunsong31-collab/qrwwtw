@@ -9,6 +9,10 @@ Launching resolves the spoken name in this order:
   3. otherwise a polite "couldn't find it" (no error pop-ups).
 Closing terminates matching processes gracefully (psutil), falling back to a kill only if
 they don't exit.
+
+SPEED (v1.4): the index (Start Menu walk + `Get-StartApps`, 1-3 s) is built in the
+background at start-up, and a stale index is used at once while a fresh one is built behind
+it, so "open ..." never waits for PowerShell.
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 from typing import List, Optional, Tuple
 
@@ -69,11 +74,44 @@ def _start_menu_dirs() -> List[str]:
     return dirs
 
 
+_INDEX_LOCK = threading.Lock()
+_REFRESHING = threading.Event()
+
+
 def build_index(force: bool = False) -> List[Tuple[str, str, str]]:
     if not IS_WINDOWS:
         return []
-    if not force and _INDEX["items"] and time.time() - _INDEX["t"] < _INDEX_TTL:
+    if not force and _INDEX["items"]:
+        if time.time() - _INDEX["t"] >= _INDEX_TTL:
+            refresh_index_async()            # answer now with the old index, refresh behind it
         return _INDEX["items"]
+    with _INDEX_LOCK:                        # one build at a time; a waiting caller reuses it
+        if not force and _INDEX["items"]:
+            return _INDEX["items"]
+        items = _scan_apps()
+        _INDEX.update(t=time.time(), items=items)
+        return items
+
+
+def refresh_index_async() -> None:
+    if not IS_WINDOWS or _REFRESHING.is_set():
+        return
+    _REFRESHING.set()
+
+    def run():
+        try:
+            with _INDEX_LOCK:
+                items = _scan_apps()
+                _INDEX.update(t=time.time(), items=items)
+        except Exception:
+            pass
+        finally:
+            _REFRESHING.clear()
+
+    threading.Thread(target=run, daemon=True, name="jarvis-app-index").start()
+
+
+def _scan_apps() -> List[Tuple[str, str, str]]:
     items, seen = [], set()
     for d in _start_menu_dirs():
         for root, _, files in os.walk(d):
@@ -98,7 +136,6 @@ def build_index(force: bool = False) -> List[Tuple[str, str, str]]:
                 items.append((name, "aumid", aumid))
     except Exception:
         pass
-    _INDEX.update(t=time.time(), items=items)
     return items
 
 

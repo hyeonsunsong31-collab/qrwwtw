@@ -5,6 +5,10 @@ Primary path: resolve the query to an audio stream with yt-dlp (run through this
 so it works without being on PATH), then play it in the background with ffplay (installed
 by the setup script) or mpv. Fallback: open a web player in the default browser.
 stop_music() stops local playback; the supervisor keeps yt-dlp updated weekly.
+
+SPEED (v1.4): the song is looked up with yt-dlp inside this process (no new Python to start
+and import for every request; the module is imported in the background at start-up), and
+where the player lives is found once and remembered.
 """
 from __future__ import annotations
 
@@ -24,8 +28,21 @@ _now_playing = None
 _lock = threading.Lock()
 
 
+_PLAYER = {"found": False, "value": None}
+
+
 def find_player():
-    """Return a command prefix for ffplay or mpv, or None."""
+    """Return (kind, path) for ffplay or mpv, or None. Remembered once found (the search
+    walks the WinGet package folders, which is slow)."""
+    if _PLAYER["found"]:
+        return _PLAYER["value"]
+    found = _find_player()
+    if found:
+        _PLAYER.update(found=True, value=found)
+    return found
+
+
+def _find_player():
     for exe in ("ffplay", "mpv"):
         p = shutil.which(exe)
         if p:
@@ -42,8 +59,39 @@ def find_player():
     return None
 
 
+def warm_up() -> None:
+    """Import yt-dlp and locate the player ahead of the first request."""
+    try:
+        import yt_dlp  # type: ignore  # noqa: F401
+    except Exception:
+        pass
+    find_player()
+
+
+def _resolve_in_process(query: str):
+    import yt_dlp  # type: ignore
+    opts = {"format": "bestaudio/best", "noplaylist": True, "default_search": "ytsearch1",
+            "quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 20}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(query, download=False)
+    if info and info.get("entries") is not None:
+        info = next((e for e in info["entries"] if e), None)
+    if not info:
+        return None, None
+    url = info.get("url")
+    if not url and info.get("requested_formats"):
+        url = info["requested_formats"][0].get("url")
+    return info.get("title"), url
+
+
 def _resolve_stream(query: str):
     """Return (title, stream_url) using yt-dlp, or (None, None)."""
+    try:
+        title, url = _resolve_in_process(query)
+        if url:
+            return title, url
+    except Exception:
+        pass                                 # fall back to running yt-dlp as its own process
     try:
         cp = subprocess.run(
             [sys.executable, "-m", "yt_dlp", "-f", "bestaudio", "--no-playlist",

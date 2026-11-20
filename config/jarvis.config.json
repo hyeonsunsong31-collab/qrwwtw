@@ -1,5 +1,5 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "identity": {
     "name": "JARVIS",
     "persona": "A refined British gentleman's valet in the spirit of a classic butler: courteous, witty, concise, unflappable. Addresses the user as 'sir' unless told otherwise.",
@@ -27,7 +27,8 @@
       "engine": "faster-whisper",
       "model": "auto",
       "language": "auto",
-      "notes": "auto = large-v3-turbo on an NVIDIA GPU, small on CPU."
+      "end_silence_ms": 600,
+      "notes": "auto = large-v3-turbo on an NVIDIA GPU, small on CPU (greedy decoding for speed). end_silence_ms = how long a pause ends a spoken command; raise it if JARVIS cuts you off mid-sentence."
     },
     "wakeword": {
       "engine": "vosk",
@@ -51,20 +52,24 @@
     "model_candidates": {
       "high": "qwen2.5:14b",
       "medium": "qwen2.5:7b",
-      "low": "qwen2.5:3b"
+      "low": "qwen2.5:3b",
+      "tiny": "qwen2.5:1.5b"
     },
     "temperature": 0.7,
-    "context_tokens": 8192,
-    "notes": "The installer pulls a model sized to this PC and writes its exact name to 'model'. 'auto' picks the strongest installed candidate."
+    "context_tokens": 4096,
+    "keep_alive": "always",
+    "notes": "The installer pulls a model this PC can run quickly (without an NVIDIA GPU of 6 GB or more, the 3B model) and writes its exact name to 'model'. 'auto' picks the strongest installed candidate. keep_alive: 'always' keeps the model loaded so no reply waits for it to load (it stays in memory while JARVIS runs); '1h', '15m' or '5m' let Ollama unload it after that much idle time. context_tokens is sent with every request (changing it makes Ollama reload the model); the installer sets 8192 on GPUs with 12 GB or more."
   },
   "neural_core": {
     "enabled": true,
     "nominal_neurons": 200000000000,
     "active_neurons": "auto",
     "active_neurons_bounds": [20000, 2000000],
+    "latency_budget_ms": 60,
+    "settle_steps": 10,
     "synapse_plasticity": true,
     "modules": ["cortex", "cerebellum", "thalamus", "brainstem", "hippocampus", "basal_ganglia"],
-    "notes": "nominal_neurons is the documented design scale (requirement 1). active_neurons is what actually instantiates, bounded by detected RAM. The mesh runs as a control/modulation layer over the LLM output."
+    "notes": "nominal_neurons is the documented design scale (requirement 1). active_neurons is what actually instantiates: with 'auto', the smaller of what RAM allows and what keeps one command's settle (settle_steps steps) within latency_budget_ms, measured on this PC at start-up -- the mesh runs on every command before JARVIS answers. The mesh runs as a control/modulation layer over the LLM output."
   },
   "self_model": {
     "enabled": true,

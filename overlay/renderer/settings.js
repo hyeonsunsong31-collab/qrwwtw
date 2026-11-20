@@ -57,12 +57,13 @@ function row(key, spec, value) {
     spec.choices.forEach((c) => { const o = document.createElement("option"); o.value = c; o.textContent = c;
       if (c === value) o.selected = true; ctl.appendChild(o); });
     ctl.addEventListener("change", () => send(key, ctl.value));
-  } else if (spec.type === "float") {
+  } else if (spec.type === "float" || spec.type === "int") {
     const wrap = document.createElement("span"); wrap.className = "set-range";
     ctl = document.createElement("input"); ctl.type = "range";
     ctl.min = spec.min; ctl.max = spec.max; ctl.step = spec.step || 0.05; ctl.value = value;
-    const out = document.createElement("output"); out.textContent = Number(value).toFixed(2);
-    ctl.addEventListener("input", () => { out.textContent = Number(ctl.value).toFixed(2); });
+    const digits = spec.type === "int" ? 0 : 2;
+    const out = document.createElement("output"); out.textContent = Number(value).toFixed(digits);
+    ctl.addEventListener("input", () => { out.textContent = Number(ctl.value).toFixed(digits); });
     ctl.addEventListener("change", () => send(key, Number(ctl.value)));
     wrap.appendChild(ctl); wrap.appendChild(out);
     if (spec.locked) ctl.disabled = true;

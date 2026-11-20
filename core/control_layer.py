@@ -42,6 +42,9 @@ from .self_model import SelfModel
 from .scale import resolve_scale
 
 SIGNALS = ["formality", "verbosity", "confidence", "persona_adherence", "warmth", "caution"]
+# v1.4 stores synapses sorted by target neuron, so gains saved by older versions (another
+# order) must not be loaded onto them: the file name carries the layout.
+GAIN_FILE = "synaptic_gain.rowsorted.npy"
 
 # Which module each control signal is read from (functional mapping).
 SIGNAL_SOURCE = {
@@ -243,7 +246,7 @@ class ControlLayer:
             os.makedirs(self.state_dir, exist_ok=True)
             with open(os.path.join(self.state_dir, "control_bias.json"), "w") as fh:
                 json.dump(self.learned_bias, fh, indent=2)
-            np.save(os.path.join(self.state_dir, "synaptic_gain.npy"), self.mesh.gain)
+            np.save(os.path.join(self.state_dir, GAIN_FILE), self.mesh.gain)
         except OSError:
             pass
 
@@ -253,7 +256,7 @@ class ControlLayer:
             if os.path.exists(p):
                 with open(p) as fh:
                     self.learned_bias.update(json.load(fh))
-            g = os.path.join(self.state_dir, "synaptic_gain.npy")
+            g = os.path.join(self.state_dir, GAIN_FILE)
             if os.path.exists(g):
                 arr = np.load(g)
                 if arr.shape == self.mesh.gain.shape:

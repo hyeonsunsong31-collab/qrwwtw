@@ -98,4 +98,14 @@ REGISTRY: Dict[str, Skill] = {
     "read_page":      Skill(_call(browser.read_page), "browser_read", "browser"),
 }
 
-__all__ = ["REGISTRY", "Skill"]
+def warm_up() -> None:
+    """Prepare the slow parts of the skills in the background at start-up (the app index,
+    yt-dlp and the music player lookup), so the first "open ..." or "play ..." is fast."""
+    for step in (apps.build_index, music.warm_up):
+        try:
+            step()
+        except Exception:
+            pass
+
+
+__all__ = ["REGISTRY", "Skill", "warm_up"]

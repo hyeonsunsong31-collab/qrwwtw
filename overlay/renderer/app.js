@@ -230,7 +230,9 @@ function renderDisposition(state) {
 function renderStatus() {
   const act = Number(status.neurons_active || 0).toLocaleString();
   const nom = Number(status.neurons_nominal || 2e11).toExponential(1);
-  neuralReadout.textContent = `neural mesh · ${act} / ${nom}` + (status.llm_online === false ? ` · ${t("llm_offline")}` : "");
+  const llm = status.llm_online === false ? ` · ${t("llm_offline")}`
+            : status.llm_state === "loading" ? ` · ${t("llm_warming")}` : "";
+  neuralReadout.textContent = `neural mesh · ${act} / ${nom}` + llm;
 }
 
 bus.on("hello", (m) => {

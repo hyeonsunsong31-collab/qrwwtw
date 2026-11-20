@@ -1,4 +1,4 @@
-# 요구사항 → 구현 매핑 (v1.3.0)
+# 요구사항 → 구현 매핑 (v1.4.0)
 
 사용자가 제시한 21개 요구사항 + 추가 2개를 어디서/어떻게 구현했는지, 그리고 **어떻게 검증했는지**를 기록합니다.
 
@@ -37,6 +37,7 @@
 | 9 | 비상 웨이크 버튼 영구 표시 | `#reactor`, `overlay/main.js` | 항상-위 오버레이(작업 영역 안, 작업 표시줄 바로 위) + `Ctrl+Alt+J` + 트레이. 누르면 응답 후 바로 듣기. 시작 시 배너와 함께 강조. | 🌐 ⚙️ |
 | 10 | 웨이크 시 어디서든 버튼 오버레이 | `overlay/main.js` | `screen-saver` 레벨 항상-위, 모든 워크스페이스, 클릭 통과. | ⚙️ |
 | 11 | 자연스러운 대화 | `agent/prompts/*`, `agent/llm_ollama.py`, `agent/orchestrator.py` | 영국 집사 페르소나 + 로컬 LLM + 스트리밍(첫 문장부터 발화) + 제어신호. | ✅(스트리밍) ⚙️(LLM 품질) |
+| 11+ | **빠른 응답**(v1.4) | `core/brain_mesh.py` `build_mesh`, `agent/llm_ollama.py`, `agent/orchestrator.py`, `voice/*`, `docs/TROUBLESHOOTING.md` | 신경 메시를 명령당 시간 예산으로 크기 결정(명령→첫 음성 4.8s→0.07s, LLM 제외 실측), 모델 상시 적재·예열·재적재, 턴마다 그대로인 프롬프트(캐시 재사용), PC에 맞는 모델, 첫 구절 발화, 음성 합성 파이프라인·문구 캐시, Whisper 빠른 설정·예열, 느린 작업 즉시 응답. | ✅ ⚙️(실제 Ollama 속도) |
 | 12 | 높은 입력 인지 정확도 | `voice/stt.py`, `voice/engine.py` | GPU면 large-v3-turbo, CPU면 small, "Jarvis" 핫워드, VAD 종료 감지. | ⚙️ |
 | 13 | 음성 중단 + 새 입력 | `voice/engine.py`, `voice/wakeword.py` `heard_keyword`, `agent/server.py` `interrupt` | 키워드 바지인(에코 무시) / VAD / 끄기. 새 명령은 진행 중 답변 취소. | ✅(상태기계) ⚙️(오디오) |
 | 14 | 기능 명령 유연성 | `agent/nlu.py`, LLM `<action>` 태그 | 한/영 자유 표현 + LLM 도구 호출 폴백. | ✅ |
@@ -52,7 +53,7 @@
 
 ## 빌드 호스트에서 실행한 검증
 - `tests/test_core.py` 7/7 · `tests/test_phase2.py` 7/7 · `tests/test_drive.py` 7/7 · `tests/test_voice_engine.py` 5/5 ·
-  `tests/test_self_model.py` 9/9 · `tests/test_boot.py` 15/15 · `scripts/mock_run.py` · `scripts/healthcheck.py`.
+  `tests/test_self_model.py` 10/10 · `tests/test_boot.py` 15/15 · `tests/test_speed.py` 16/16 · `scripts/mock_run.py` · `scripts/healthcheck.py`.
 - `tests/test_server_e2e.py` — 실제 uvicorn 서버: 토큰 없는/잘못된/웹 Origin 접속 거부, 명령→UI 이벤트, 스트리밍(28 델타·3문장),
   한국어 응답, 권한 거부 왕복, 3D 저장·불러오기·.glb 내보내기(경로 조작 무력화), 설정 적용·잠긴 권한 거부, 신경망 점, 기록, 감사 로그.
 - **실제 Electron 앱** + 실제 서버 E2E 19개 시나리오(시작 배너·창 상태·세션 전달·WAKE·3D·내보내기·신경망·스트리밍·자기 코어·

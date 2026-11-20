@@ -31,7 +31,7 @@ from .interrupt import BargeInMonitor
 
 SR = 16000
 FRAME = SR * 20 // 1000          # 320 samples = 20 ms
-END_SILENCE_FRAMES = 40          # 0.8 s of silence ends a command
+END_SILENCE_FRAMES = 30          # default: 0.6 s of silence ends a command (voice.stt.end_silence_ms)
 MAX_CAPTURE_FRAMES = 750         # 15 s cap
 NO_SPEECH_FRAMES = 300           # give up after 6 s without speech
 PARTIAL_KEYWORD_FRAMES = 4       # a keyword must persist this many frames in a partial result
@@ -60,6 +60,8 @@ class VoiceEngine:
         self._loop = None
         self._frames: Optional[asyncio.Queue] = None
         self._speech: Optional[asyncio.Queue] = None
+        self._speech_gen = 0           # bumped by stop_speaking(): older queued items are dropped
+        self.end_silence_frames = END_SILENCE_FRAMES
         try:
             import sounddevice as sd  # type: ignore
             import numpy as np  # type: ignore
@@ -90,6 +92,23 @@ class VoiceEngine:
             self.detector.sensitivity = float(ww.get("sensitivity", 0.6))
         if getattr(self, "speaker", None) is not None:
             self.speaker.rate = float(v.get("tts", {}).get("rate", 1.0))
+        try:
+            ms = float(v.get("stt", {}).get("end_silence_ms", END_SILENCE_FRAMES * 20))
+        except (TypeError, ValueError):
+            ms = END_SILENCE_FRAMES * 20
+        self.end_silence_frames = max(10, min(100, int(round(ms / 20.0))))
+
+    def warm_up(self, phrases=()) -> dict:
+        """Called once in the background at start-up: load/initialise the speech models and
+        synthesise the frequent phrases, so nothing is slow the first time it is used."""
+        done = {"stt": False, "phrases": 0}
+        if not self.available:
+            return done
+        if hasattr(self.stt, "warm_up"):
+            done["stt"] = bool(self.stt.warm_up())
+        if hasattr(self.speaker, "prewarm"):
+            done["phrases"] = self.speaker.prewarm(list(phrases))
+        return done
 
     async def _set_state(self, state: str):
         if state == self.state:
@@ -105,12 +124,13 @@ class VoiceEngine:
     def enqueue(self, text: str, lang: str = "en"):
         """Queue a sentence to speak (non-blocking)."""
         if self.available and self._speech is not None and (text or "").strip():
-            self._speech.put_nowait((text, lang))
+            self._speech.put_nowait((text, lang, self._speech_gen))
 
     def stop_speaking(self):
         if not self.available:
             return
         self._pending_capture = False
+        self._speech_gen += 1
         if self._speech is not None:
             while not self._speech.empty():
                 try:
@@ -120,19 +140,62 @@ class VoiceEngine:
         self.speaker.stop()
 
     async def _speech_worker(self):
+        """Speak queued sentences in order. When the speaker supports it, the NEXT sentence is
+        synthesised while the current one plays, so there is no pause between sentences."""
+        pipelined = hasattr(self.speaker, "prepare") and hasattr(self.speaker, "play_prepared")
+        pending = None                                   # (text, lang, gen, future) synthesised ahead
         while self._running:
-            text, lang = await self._speech.get()
+            if pending is not None:
+                text, lang, gen, fut = pending
+                pending = None
+            else:
+                text, lang, gen = await self._speech.get()
+                fut = self._prepare(text, lang) if pipelined else None
+            if gen != self._speech_gen:                  # interrupted after it was queued
+                if fut is not None:
+                    fut.cancel()
+                await self._speech_finished(pending)
+                continue
             self.current_text = text
             self.vad.reset()
             await self._set_state("speaking")
-            await self._loop.run_in_executor(None, self.speaker.speak, text, lang)
+            if not pipelined:
+                await self._loop.run_in_executor(None, self.speaker.speak, text, lang)
+            else:
+                try:
+                    prepared = await fut
+                except Exception:
+                    prepared = None
+                if gen == self._speech_gen and prepared is not None:
+                    self.speaker.reset_stop()
+                    play = self._loop.run_in_executor(None, self.speaker.play_prepared, prepared)
+                    while not play.done():
+                        if pending is None and not self._speech.empty():
+                            nt, nl, ng = self._speech.get_nowait()
+                            pending = (nt, nl, ng, self._prepare(nt, nl))
+                        await asyncio.wait([play], timeout=0.03)
+                    try:
+                        play.result()
+                    except Exception:
+                        pass
+                if pending is None and not self._speech.empty():
+                    nt, nl, ng = self._speech.get_nowait()
+                    pending = (nt, nl, ng, self._prepare(nt, nl))
             self.current_text = ""
-            if self._speech.empty() and self.state == "speaking":
-                if self._pending_capture:
-                    self._pending_capture = False
-                    await self._enter_capture()
-                else:
-                    await self._set_state("idle" if self.listening else "muted")
+            await self._speech_finished(pending)
+
+    async def _speech_finished(self, pending):
+        """Nothing left to say: listen for the command that was waiting, or go back to idle."""
+        stale = pending is not None and pending[2] != self._speech_gen
+        if (pending is None or stale) and self._speech.empty() and self.state == "speaking":
+            if self._pending_capture:
+                self._pending_capture = False
+                await self._enter_capture()
+            else:
+                await self._set_state("idle" if self.listening else "muted")
+
+    def _prepare(self, text: str, lang: str):
+        return self._loop.run_in_executor(None, self.speaker.prepare, text, lang)
 
     # ----------------------------------------------------------- capture #
     def begin_capture(self, after_speech: bool = True):
@@ -271,7 +334,7 @@ class VoiceEngine:
         speech = self.vad.is_speech(frame) if self.vad.available else True
         self._had_speech = self._had_speech or speech
         self._silence = 0 if speech else self._silence + 1
-        done = (self._had_speech and self._silence >= END_SILENCE_FRAMES) \
+        done = (self._had_speech and self._silence >= self.end_silence_frames) \
             or self._cap_frames >= MAX_CAPTURE_FRAMES
         if not done and not (not self._had_speech and self._cap_frames >= NO_SPEECH_FRAMES):
             return
