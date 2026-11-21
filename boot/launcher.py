@@ -542,9 +542,18 @@ def report_success(status: dict, already: bool) -> int:
     say("     * JARVIS keeps running in the background. To quit it, right-click the")
     say("       JARVIS icon next to the clock and choose Quit JARVIS.")
     notes = []
+    tps, gpu = status.get("llm_tokens_per_s"), status.get("llm_gpu")
     if status.get("llm_online") is False:
         notes.append("The language model (Ollama) is not running yet, so replies are basic. "
                      "INSTALL_JARVIS.bat installs and starts it.")
+    elif status.get("llm_state") == "loading":
+        notes.append("The language model is still loading into memory (the first start after switching "
+                     "the PC on can take a minute). Replies are quick once it has loaded, and it stays loaded.")
+    elif isinstance(tps, (int, float)) and tps < 6:
+        where = "on the processor" if not gpu else "partly on the processor"
+        notes.append(f"Replies are slow on this PC: the language model runs {where} at about {tps:.0f} "
+                     "tokens a second. Run INSTALL_JARVIS.bat once more - it now picks a model sized "
+                     "for this PC so replies come quickly.")
     vs = status.get("voice_state")
     if vs == "loading":
         notes.append("The voice is still loading; the wake phrase will work in a moment.")

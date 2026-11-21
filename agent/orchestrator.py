@@ -12,6 +12,13 @@ Pipeline per command:
 After every command the self core (core/self_model.py) learns from how it went, and its
 fixed directive plus what it has learned are part of the language model's instructions.
 
+SPEED (v1.4): the language model reuses its cache of a prompt prefix it has already read,
+so everything that changes per turn (the neural style directive, recent-mistake notes) rides
+on the user message as a short [Host note], while the system prompt and the history stay
+byte-identical between turns; the history is trimmed in large steps, not one turn at a time.
+The first clause of a long opening sentence is spoken without waiting for its full stop,
+slow skills are acknowledged at once, and the reply is shown and spoken before bookkeeping.
+
 LLM replies are STREAMED: each finished sentence is spoken as soon as it exists, so JARVIS
 starts talking within a moment instead of after the whole answer is generated (requirement
 11). A new command or a barge-in cancels the task; the run is recorded as interrupted.
@@ -26,6 +33,7 @@ import json
 import os
 import re
 import threading
+import time
 from typing import Awaitable, Callable, List, Optional, Tuple
 
 from core.control_layer import ControlLayer
@@ -40,16 +48,34 @@ EmitFn = Callable[[dict], Awaitable[None]]
 DIRECT_SKILL_MIN_CONF = 0.6
 _BOUNDARY = re.compile(r"[.!?。！？…][\"')\]]*\s+|\n+")
 _DANGLING_TAG = re.compile(r"<action.*$", re.S)
+_CLAUSE = re.compile(r"[,;:]\s+|\s[-–—]\s+")
+
+# conversation context for the language model: trimmed in large steps so the kept part is
+# an unchanged prefix (cached by the model) for several turns in a row
+HISTORY_MAX_MESSAGES = 16
+HISTORY_MAX_CHARS = 6000
+HISTORY_KEEP_MESSAGES = 8
+DELTA_INTERVAL = 0.04          # at most ~25 chat-bubble updates a second while streaming
+
+# skills that can take a few seconds: say something at once, then the result
+ACK_INTENTS = {"play_music", "file_search", "read_page"}
+ACK = {"en": "Right away, sir.", "ko": "바로 하겠습니다, sir."}
+WARMING = {"en": "One moment, sir. My language engine is still warming up.",
+           "ko": "잠시만요, sir. 언어 엔진이 아직 준비 중입니다."}
+
+_PROMPTS: dict = {}
 
 
 def _load_prompt(lang: str) -> str:
-    here = os.path.dirname(__file__)
-    fn = os.path.join(here, "prompts", f"system_{'ko' if lang == 'ko' else 'en'}.txt")
-    try:
-        with open(fn, encoding="utf-8") as fh:
-            return fh.read()
-    except OSError:
-        return "You are JARVIS, a courteous British butler AI."
+    key = "ko" if lang == "ko" else "en"
+    if key not in _PROMPTS:
+        fn = os.path.join(os.path.dirname(__file__), "prompts", f"system_{key}.txt")
+        try:
+            with open(fn, encoding="utf-8") as fh:
+                _PROMPTS[key] = fh.read().strip()
+        except OSError:
+            return "You are JARVIS, a courteous British butler AI."
+    return _PROMPTS[key]
 
 
 def pop_sentences(buf: str, min_len: int = 14) -> Tuple[List[str], str]:
@@ -63,6 +89,22 @@ def pop_sentences(buf: str, min_len: int = 14) -> Tuple[List[str], str]:
             out.append(candidate)
             start = m.end()
     return out, buf[start:]
+
+
+def pop_first_clause(buf: str, min_len: int = 24, trigger: int = 60, hard: int = 180) -> Tuple[Optional[str], str]:
+    """Before the first sentence of a reply is complete, take its first clause once the
+    buffer is long enough, so a long opening sentence does not hold back the first word.
+    Returns (clause or None, remainder)."""
+    if len(buf) < trigger:
+        return None, buf
+    for m in _CLAUSE.finditer(buf):
+        if m.end() >= min_len:
+            return buf[:m.end()].strip(), buf[m.end():]
+    if len(buf) >= hard:                              # no pause at all: break at a word
+        cut = buf.rfind(" ", min_len, hard)
+        if cut > 0:
+            return buf[:cut].strip(), buf[cut + 1:]
+    return None, buf
 
 
 def display_text(raw: str) -> str:
@@ -85,6 +127,8 @@ class Orchestrator:
         self.default_lang = config.get("language", {}).get("default", "en")
         self.awake = True
         self._last_denied = False
+        # exactly what the language model was sent and produced, turn by turn (see SPEED)
+        self.llm_history: List[dict] = []
         # the self core: fixed directive + the self-model learned from experience
         self.selfmodel = getattr(self.control, "selfmodel", None)
         if self.selfmodel is not None:
@@ -97,6 +141,43 @@ class Orchestrator:
 
     def self_summary(self) -> Optional[dict]:
         return self.selfmodel.summary() if self.selfmodel is not None else None
+
+    # ------------------------------------------------- prompt for the LLM #
+    def system_prompt(self, lang: str) -> str:
+        """Everything in the language model's instructions that does not change from turn to
+        turn, so the model can reuse its cache of it on every request."""
+        system = _load_prompt(lang)
+        if self.selfmodel is not None:
+            system += "\n\n" + self.selfmodel.prompt_context(lang)
+        return system
+
+    def _turn_note(self, control, lang: str) -> str:
+        """What changes per turn, appended to the user message instead of the system prompt."""
+        parts = [control.style_directive] if control.style_directive else []
+        if self.selfmodel is not None:
+            careful = self.selfmodel.careful_note(lang)
+            if careful:
+                parts.append(careful)
+        return ("[Host note - not from the user: " + " ".join(parts) + "]") if parts else ""
+
+    def _llm_live(self) -> bool:
+        try:
+            return self.llm.model_name() != "offline-fallback"
+        except Exception:
+            return True
+
+    def _remember_llm_turn(self, user_msg: str, assistant_msg: str):
+        self.llm_history += [{"role": "user", "text": user_msg},
+                             {"role": "assistant", "text": assistant_msg}]
+        h = self.llm_history
+        if len(h) <= HISTORY_MAX_MESSAGES and sum(len(m["text"]) for m in h) <= HISTORY_MAX_CHARS:
+            return
+        keep = h[-HISTORY_KEEP_MESSAGES:]
+        while len(keep) > 2 and sum(len(m["text"]) for m in keep) > HISTORY_MAX_CHARS // 2:
+            keep = keep[2:]
+        while keep and keep[0]["role"] != "user":
+            keep = keep[1:]
+        self.llm_history = keep
 
     async def _learn(self, intent_name: str, lang: str, outcome: str, rid: Optional[str] = None):
         """Self-education step: the self-model integrates how this request went."""
@@ -174,6 +255,7 @@ class Orchestrator:
                 reply, lang = await self._do_skill(intent.name, intent.args, text, lang, rid)
                 reply = self.control.postprocess(reply, control)
                 to_say = reply
+                self._remember_llm_turn(text, reply)      # context for later conversation
             else:
                 reply, to_say = await self._do_chat(text, lang, control, rid)
             self.recorder.end_run(rid, "success", summary=reply[:200])
@@ -189,18 +271,19 @@ class Orchestrator:
                      if lang == "en" else "죄송합니다, sir - 수행 중 문제가 발생했습니다.")
             to_say = reply
             outcome = "failed"
-        # update the drive layer's disposition from how this interaction went
-        drive_state = await self._run_blocking(self.control.note_outcome, outcome, risk, sentiment)
-        await self._learn(intent.name, lang, outcome, rid)
-        await self._emit({"type": "control", "state": drive_state, "self": self.self_summary()})
-
+        # show and speak the reply first; the bookkeeping below must not delay it
         self.history.append({"role": "assistant", "text": reply})
         self.history[:] = self.history[-24:]
-        self.recorder.log_conversation("assistant", reply, lang=lang, run_id=rid)
         await self._emit({"type": "transcript", "role": "assistant", "text": reply, "lang": lang,
                           "msg_id": rid, "final": True})
         if to_say.strip():
             await self._emit({"type": "say", "text": to_say.strip(), "lang": lang})
+        self.recorder.log_conversation("assistant", reply, lang=lang, run_id=rid)
+
+        # update the drive layer's disposition from how this interaction went
+        drive_state = await self._run_blocking(self.control.note_outcome, outcome, risk, sentiment)
+        await self._learn(intent.name, lang, outcome, rid)
+        await self._emit({"type": "control", "state": drive_state, "self": self.self_summary()})
 
         await self._follow_ups(intent.name, lang, rid)
         self.recorder.checkpoint({"last_command": text, "intent": intent.name,
@@ -208,7 +291,7 @@ class Orchestrator:
         await self._emit({"type": "state", "state": "idle"})
 
     # ----------------------------------------------------------- skill run #
-    async def _do_skill(self, name, args, text, lang, rid):
+    async def _do_skill(self, name, args, text, lang, rid, ack: bool = True):
         skill = REGISTRY[name]
         self.recorder.run_step(rid, f"intent '{name}' args={args}")
 
@@ -222,6 +305,9 @@ class Orchestrator:
             return (("I'll hold off on that, sir - permission wasn't granted."
                      if lang == "en" else "그 작업은 보류하겠습니다, sir - 권한이 없습니다."), lang)
 
+        if ack and name in ACK_INTENTS:
+            # these can take seconds (finding a song, searching the disk): answer at once
+            await self._emit({"type": "say", "text": ACK["ko" if lang == "ko" else "en"], "lang": lang})
         result = await self._run_blocking(skill.handler, args)
         data = result.get("data") or {}
         self.recorder.run_step(rid, f"result ok={result.get('ok')}",
@@ -242,15 +328,17 @@ class Orchestrator:
     # ------------------------------------------------------------- chat/LLM #
     async def _do_chat(self, text, lang, control, rid) -> Tuple[str, str]:
         """Return (full reply for the transcript, text that still needs to be spoken)."""
-        system = _load_prompt(lang)
-        if self.selfmodel is not None:
-            system += "\n\n" + self.selfmodel.prompt_context(lang)
-        if control.style_directive:
-            system += "\n\nSTYLE: " + control.style_directive
-        history = list(self.history[:-1])  # the current user turn is passed separately
+        system = self.system_prompt(lang)
+        note = self._turn_note(control, lang)
+        user_msg = f"{text}\n\n{note}" if note else text
+        history = list(self.llm_history)
+        if getattr(self.llm, "state", "ready") == "loading":
+            await self._emit({"type": "say", "text": WARMING["ko" if lang == "ko" else "en"], "lang": lang})
 
         if not hasattr(self.llm, "chat_stream"):
-            raw = await self._run_blocking(self.llm.chat, system, text, history, control.llm_params)
+            raw = await self._run_blocking(self.llm.chat, system, user_msg, history, control.llm_params)
+            if self._llm_live():
+                self._remember_llm_turn(user_msg, raw)
             prose, action_replies = await self._finish_llm(raw, text, lang, rid)
             reply = (prose + " " + action_replies).strip()
             return reply, reply
@@ -262,7 +350,7 @@ class Orchestrator:
 
         def producer():
             try:
-                for piece in self.llm.chat_stream(system, text, history, control.llm_params,
+                for piece in self.llm.chat_stream(system, user_msg, history, control.llm_params,
                                                   stop_event=stop):
                     loop.call_soon_threadsafe(queue.put_nowait, piece)
                     if stop.is_set():
@@ -276,6 +364,7 @@ class Orchestrator:
         max_sentences = 2 if control.signals.get("verbosity", 0.5) < 0.2 else None
         full, buf, said = "", "", 0
         muted = False
+        last_delta = 0.0
         try:
             while True:
                 item = await queue.get()
@@ -284,8 +373,11 @@ class Orchestrator:
                 if isinstance(item, Exception):
                     raise item
                 full += item
-                await self._emit({"type": "transcript_delta", "role": "assistant",
-                                  "text": display_text(full), "lang": lang, "msg_id": rid})
+                now = time.monotonic()
+                if now - last_delta >= DELTA_INTERVAL:
+                    last_delta = now
+                    await self._emit({"type": "transcript_delta", "role": "assistant",
+                                      "text": display_text(full), "lang": lang, "msg_id": rid})
                 if muted:
                     continue
                 buf += item
@@ -296,6 +388,10 @@ class Orchestrator:
                     buf, muted = "", True
                     continue
                 sentences, buf = pop_sentences(buf)
+                if not sentences and said == 0:
+                    clause, buf = pop_first_clause(buf)
+                    if clause:
+                        sentences = [clause]
                 for s in sentences:
                     await self._emit({"type": "say", "text": s, "lang": lang})
                     said += 1
@@ -306,8 +402,12 @@ class Orchestrator:
         finally:
             stop.set()
 
+        await self._emit({"type": "transcript_delta", "role": "assistant",
+                          "text": display_text(full), "lang": lang, "msg_id": rid})
         if not muted and buf.strip():
             await self._emit({"type": "say", "text": buf.strip(), "lang": lang})
+        if self._llm_live():
+            self._remember_llm_turn(user_msg, full)
         prose, action_replies = await self._finish_llm(full, text, lang, rid,
                                                        max_sentences=max_sentences)
         reply = (prose + " " + action_replies).strip()
@@ -321,7 +421,7 @@ class Orchestrator:
         for act in parse_action_tags(raw):
             if act.name in REGISTRY:
                 self.recorder.run_step(rid, f"LLM-requested action '{act.name}'")
-                act_reply, _ = await self._do_skill(act.name, act.args, text, lang, rid)
+                act_reply, _ = await self._do_skill(act.name, act.args, text, lang, rid, ack=False)
                 replies.append(act_reply)
         prose = strip_action_tags(raw).strip()
         if max_sentences:

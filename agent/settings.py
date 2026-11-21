@@ -40,6 +40,12 @@ SCHEMA: Dict[str, dict] = {
     "llm.temperature":           {"type": "float", "min": 0.0, "max": 1.5, "step": 0.05,
                                   "label": "Creativity"},
     "self_model.enabled":        {"type": "bool", "label": "Self-learning (remember what I learn)"},
+    "llm.keep_alive":            {"type": "choice", "choices": ["always", "1h", "15m", "5m"],
+                                  "label": "Keep the language model loaded (faster replies)"},
+    "voice.stt.end_silence_ms":  {"type": "int", "min": 300, "max": 1500, "step": 50,
+                                  "label": "Pause that ends a spoken command (ms)"},
+    "llm.context_tokens":        {"type": "int", "min": 2048, "max": 32768, "step": 1024,
+                                  "label": "Language model context (tokens)", "restart": True},
 }
 
 PERMISSION_CHOICES = ["allow", "ask", "deny"]
@@ -109,6 +115,14 @@ def validate(key: str, value: Any) -> Any:
         if not (spec["min"] <= v <= spec["max"]):
             raise ValueError(f"must be between {spec['min']} and {spec['max']}")
         return round(v, 3)
+    if t == "int":
+        try:
+            v = int(round(float(value)))
+        except (TypeError, ValueError):
+            raise ValueError("must be a whole number")
+        if not (spec["min"] <= v <= spec["max"]):
+            raise ValueError(f"must be between {spec['min']} and {spec['max']}")
+        return v
     if t == "str":
         v = str(value).strip()
         if not re.match(spec["pattern"], v):

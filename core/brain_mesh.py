@@ -24,17 +24,27 @@ Every connection is a Synaptic Perceptron synapse (short-term plasticity, see
 synaptic_perceptron.py), so the whole mesh has dynamics and memory. The mesh is driven
 by external input (from the control layer / brainstem) and read out per module.
 
-Representation is pure NumPy COO (rows, cols, data) + per-connection state, with
-`np.bincount` for the row reductions — no dense N×N matrix is ever formed, so memory is
-O(neurons × avg_degree) and the whole thing scales from 20k to millions of units.
+Representation is pure NumPy COO (rows, cols, data) + per-connection state. Synapses are
+stored sorted by target neuron, so the per-step row reduction is a single
+`np.add.reduceat` and the synapse update runs in place on preallocated buffers -- no dense
+N x N matrix and no per-step allocation of connection-sized arrays. Memory is
+O(neurons x avg_degree) and the architecture scales from 20k to millions of units.
+
+SPEED (v1.4): the mesh settles on EVERY command before JARVIS answers, so its size is set
+by a per-command time budget as well as by RAM (build_mesh). In v1.3 a 16 GB PC built a
+600k-neuron mesh that cost about 4.5 s per command; now the active size is calibrated at
+start-up so one command's settle stays within the budget (default 60 ms).
 """
 from __future__ import annotations
 
+import json
+import os
+import time
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
-from .synaptic_perceptron import SynapseParams, synapse_step, ACTIVATIONS
+from .synaptic_perceptron import SynapseParams, ACTIVATIONS
 from .scale import ScaleConfig, resolve_scale
 
 # Inter-module projection rulebook: (source, target, density, weight_mean, sign)
@@ -142,11 +152,19 @@ class BrainMesh:
             w = sgn * np.abs(self.rng.normal(wmean, wmean * 0.3, size=n_conn))
             rows.append(tgt); cols.append(src); data.append(w.astype(np.float32))
 
-        self.rows = np.concatenate(rows).astype(np.int64)
-        self.cols = np.concatenate(cols).astype(np.int64)
-        self.w = np.concatenate(data).astype(np.float32)
+        rows_a = np.concatenate(rows).astype(np.int64)
+        order = np.argsort(rows_a, kind="stable")       # synapses grouped by target neuron
+        self.rows = rows_a[order]
+        self.cols = np.concatenate(cols).astype(np.int64)[order]
+        self.w = np.concatenate(data).astype(np.float32)[order]
         self.E = self.w.size
         self.gain = np.ones(self.E, dtype=np.float32)
+        # row reduction by np.add.reduceat over the non-empty target segments
+        starts = np.searchsorted(self.rows, np.arange(self.N))
+        counts = np.diff(np.append(starts, self.E))
+        self._targets = np.flatnonzero(counts > 0)
+        self._seg_starts = starts[self._targets]
+        self._tmp = np.empty(self.E, dtype=np.float32)   # reused every step
 
         # per-neuron bias and small intrinsic leak
         self.bias = self.rng.normal(0.0, 0.05, size=self.N).astype(np.float32)
@@ -158,6 +176,7 @@ class BrainMesh:
     # ------------------------------------------------------------------ state #
     def reset_state(self):
         self.a = np.zeros(self.N, dtype=np.float32)
+        self._inp = np.zeros(self.N, dtype=np.float32)
         self.u = np.full(self.E, self.p.U, dtype=np.float32)
         self.R = np.ones(self.E, dtype=np.float32)
         self.ext = np.zeros(self.N, dtype=np.float32)
@@ -213,22 +232,37 @@ class BrainMesh:
         arousal = float(0.9 + 0.7 * np.tanh(bs.mean() if bs.size else 0.0))
 
         # presynaptic activity per connection (rectified)
-        pre = np.clip(self.a[self.cols], 0.0, None)
-        transmitted, self.u, self.R = synapse_step(
-            pre, self.w, self.u, self.R, self.gain, arousal, self.p)
+        pre = self.a[self.cols]
+        np.maximum(pre, 0.0, out=pre)
+
+        # Tsodyks-Markram short-term plasticity: the same operations, in the same order, as
+        # synapse_step() in synaptic_perceptron.py, but in place on reused buffers.
+        p, u, R, tmp = self.p, self.u, self.R, self._tmp
+        rec_rate = 1.0 - np.exp(-p.dt / p.tau_rec)
+        fac_rate = 1.0 - np.exp(-p.dt / p.tau_fac)
+        np.subtract(1.0, R, out=tmp); tmp *= rec_rate; R += tmp           # R relaxes to 1
+        np.subtract(p.U, u, out=tmp); tmp *= fac_rate; u += tmp           # u relaxes to U
+        np.subtract(1.0, u, out=tmp); tmp *= p.U; tmp *= pre; u += tmp    # facilitation
+        np.multiply(u, R, out=tmp); tmp *= pre                            # released
+        R -= tmp                                                          # depression
+        np.clip(R, 0.0, 1.0, out=R)
+        np.clip(u, 0.0, 1.0, out=u)
+        tmp *= self.w; tmp *= self.gain; tmp *= arousal                   # transmitted
 
         # sum transmitted current into each target neuron
-        inp = np.bincount(self.rows, weights=transmitted, minlength=self.N).astype(np.float32)
-        inp += self.bias + self.ext
+        inp = self._inp
+        inp[:] = 0.0
+        if self._targets.size:
+            inp[self._targets] = np.add.reduceat(tmp, self._seg_starts, dtype=np.float64)
+        inp += self.bias
+        inp += self.ext
 
         # thalamic gating: thalamus mean activity opens/closes cortical & cerebellar input
         th = self.module_activity("thalamus")
         gate = float(sigmoid_scalar(1.5 * (th.mean() if th.size else 0.0)))
-        g = np.ones(self.N, dtype=np.float32)
         for mod in ("cortex", "cerebellum"):
             s, e = self.module_range[mod]
-            g[s:e] = 0.4 + 0.6 * gate
-        inp *= g
+            inp[s:e] *= 0.4 + 0.6 * gate
 
         # update activations with a leak (recurrent stability)
         a_new = self.activation(inp)
@@ -240,6 +274,19 @@ class BrainMesh:
         for _ in range(int(steps)):
             self.step()
         return self.a
+
+    def time_settle(self, steps: int, repeats: int = 2) -> float:
+        """Seconds one settle of `steps` steps takes (the state is restored afterwards)."""
+        saved = (self.a.copy(), self.u.copy(), self.R.copy(), self.ext.copy())
+        self.ext[:] = 0.05
+        self.run(1)                                     # warm the caches
+        best = float("inf")
+        for _ in range(max(1, repeats)):
+            t0 = time.perf_counter()
+            self.run(steps)
+            best = min(best, time.perf_counter() - t0)
+        self.a, self.u, self.R, self.ext = saved
+        return best
 
     # ---------------------------------------------------------------- export #
     def sample_points(self, max_points: int = 4000) -> dict:
@@ -264,6 +311,96 @@ class BrainMesh:
             "modules": {k: (e - s) for k, (s, e) in self.module_range.items()},
             "ram_gb": self.scale.ram_gb,
         }
+
+
+_CALIBRATION: Dict[Tuple[int, int], float] = {}
+
+
+def calibrate_neurons(budget_ms: float, settle_steps: int, avg_degree: int = 32,
+                      probe_neurons: int = 20_000) -> int:
+    """How many neurons this PC can settle for `settle_steps` steps within `budget_ms`.
+
+    Times the real step on a small probe mesh and extrapolates (the cost grows with the
+    number of synapses). Cached per process."""
+    key = (settle_steps, avg_degree)
+    per_neuron = _CALIBRATION.get(key)
+    if per_neuron is None:
+        probe = BrainMesh(resolve_scale(probe_neurons, avg_degree=avg_degree))
+        per_neuron = probe.time_settle(settle_steps) / probe.N
+        _CALIBRATION[key] = per_neuron
+    if per_neuron <= 0:
+        return probe_neurons
+    # 30 % headroom: larger arrays fall out of the CPU caches, so the cost grows a bit faster
+    return int(0.7 * (budget_ms / 1000.0) / per_neuron)
+
+
+def _read_size(path: Optional[str]) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _write_size(path: Optional[str], body: dict) -> None:
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(body, fh)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def build_mesh(active_neurons="auto", latency_budget_ms: Optional[float] = 60.0,
+               settle_steps: int = 10, avg_degree: int = 32,
+               bounds: Tuple[int, int] = (20_000, 2_000_000), log=None,
+               remember: Optional[str] = None) -> "BrainMesh":
+    """The mesh JARVIS runs. An explicit size is used as given; "auto" takes the smaller of
+    what RAM allows and what keeps one command's settle within `latency_budget_ms`.
+
+    `remember` (a JSON file path) keeps the chosen size across restarts: the timing behind it
+    varies a little from run to run, and a different size would discard the synaptic gains
+    the mesh has learned. The stored size is reused while it still fits the budget."""
+    say = log or (lambda m: None)
+    if active_neurons != "auto" or not latency_budget_ms:
+        mesh = BrainMesh(resolve_scale(active_neurons, avg_degree=avg_degree, bounds=bounds))
+        mesh.settle_ms = None
+        say(f"neural mesh: {mesh.N:,} active neurons (fixed in the config)")
+        return mesh
+    by_ram = resolve_scale("auto", avg_degree=avg_degree, bounds=bounds).active_neurons
+    known = _read_size(remember)
+    if (known.get("budget_ms") == latency_budget_ms and known.get("settle_steps") == settle_steps
+            and known.get("avg_degree") == avg_degree and isinstance(known.get("neurons"), int)
+            and bounds[0] <= known["neurons"] <= by_ram):
+        mesh = BrainMesh(resolve_scale(known["neurons"], avg_degree=avg_degree, bounds=bounds))
+        took = mesh.time_settle(settle_steps, repeats=1) * 1000.0
+        if took <= 1.5 * latency_budget_ms or mesh.N <= bounds[0]:
+            mesh.settle_ms = round(took, 1)
+            say(f"neural mesh: {mesh.N:,} active neurons (kept from the last start); "
+                f"one command's settle takes {took:.0f} ms")
+            return mesh
+        say(f"neural mesh: the stored size ({mesh.N:,}) now takes {took:.0f} ms per command; recalibrating")
+    by_time = calibrate_neurons(latency_budget_ms, settle_steps, avg_degree)
+    n = max(bounds[0], min(by_ram, by_time))
+    if n > bounds[0]:
+        n = max(bounds[0], n // 1000 * 1000)                # a round size
+    mesh = BrainMesh(resolve_scale(n, avg_degree=avg_degree, bounds=bounds))
+    took = mesh.time_settle(settle_steps, repeats=1) * 1000.0
+    if took > 1.5 * latency_budget_ms and mesh.N > bounds[0]:
+        n2 = max(bounds[0], int(mesh.N * latency_budget_ms / took * 0.9))
+        say(f"neural mesh: {mesh.N:,} neurons took {took:.0f} ms per command; rebuilding with {n2:,}")
+        mesh = BrainMesh(resolve_scale(n2, avg_degree=avg_degree, bounds=bounds))
+        took = mesh.time_settle(settle_steps, repeats=1) * 1000.0
+    mesh.settle_ms = round(took, 1)
+    _write_size(remember, {"neurons": int(mesh.N), "budget_ms": latency_budget_ms, "settle_steps": settle_steps,
+                           "avg_degree": avg_degree, "settle_ms": mesh.settle_ms, "decided": time.time()})
+    say(f"neural mesh: {mesh.N:,} active neurons (RAM allows {by_ram:,}, a {latency_budget_ms:.0f} ms "
+        f"budget allows {by_time:,}); one command's settle takes {took:.0f} ms")
+    return mesh
 
 
 def sigmoid_scalar(x: float) -> float:

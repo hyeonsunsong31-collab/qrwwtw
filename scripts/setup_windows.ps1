@@ -10,7 +10,9 @@
        boot\overlay_runtime.py -- no Node.js needed; without it JARVIS has nothing to show,
        so a failure here fails the install instead of being a footnote)
     4. FFmpeg (ffplay, for music playback)
-    5. Ollama + a language model sized to this PC (GPU VRAM / RAM)
+    5. Ollama + a language model this PC runs quickly (GPU VRAM / RAM): a model that does
+       not fit an NVIDIA GPU runs on the processor at a few words a second, so CPU-only PCs
+       get the 3B model (re-running the installer on an older install switches it)
     6. voices and speech models (British Piper voice, Vosk wake-phrase model,
        openWakeWord, Whisper, hand-tracking model, Windows en-GB/ko-KR voices)
     7. folder permissions + auto-start at logon
@@ -263,6 +265,15 @@ if (-not (Find-Ollama)) {
 }
 $Ollama = Find-Ollama
 if ($Ollama) {
+    # Flash attention makes Ollama faster and lighter on GPUs that support it (it is ignored
+    # where unsupported). Machine-wide, because Ollama runs as the signed-in user.
+    if (-not [Environment]::GetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "Machine")) {
+        try {
+            [Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "Machine")
+            $env:OLLAMA_FLASH_ATTENTION = "1"
+            Ok "Ollama flash attention enabled (applies the next time Ollama starts)"
+        } catch { Info "  could not set OLLAMA_FLASH_ATTENTION (not required)" }
+    }
     if (-not (Ollama-Up)) {
         Start-Process -FilePath $Ollama -ArgumentList "serve" -WindowStyle Hidden
         for ($i = 0; $i -lt 30 -and -not (Ollama-Up); $i++) { Start-Sleep -Seconds 1 }
@@ -272,13 +283,19 @@ if ($Ollama) {
         try { $vram = [int]((& nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | Select-Object -First 1).Trim()) } catch {}
     }
     $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-    if ($vram -ge 12000)                  { $model = "qwen2.5:14b" }
-    elseif ($vram -ge 6000 -or $ram -ge 32) { $model = "qwen2.5:7b" }
-    else                                  { $model = "qwen2.5:3b" }
-    Info "  GPU memory: $vram MB, RAM: $ram GB -> model $model (large download)"
+    # Sized for SPEED: the model has to fit in the GPU's memory to answer quickly. Without a
+    # suitable NVIDIA GPU a 7B model produces only a few words a second, so those PCs get 3B.
+    if ($vram -ge 12000)    { $model = "qwen2.5:14b";  $ctx = 8192 }
+    elseif ($vram -ge 6000) { $model = "qwen2.5:7b";   $ctx = 4096 }
+    elseif ($ram -ge 8)     { $model = "qwen2.5:3b";   $ctx = 4096 }
+    else                    { $model = "qwen2.5:1.5b"; $ctx = 4096 }
+    Info "  GPU memory: $vram MB, RAM: $ram GB -> model $model, context $ctx (sized so replies stay quick)"
     if (Retry { & $Ollama pull $model } 3 "model download") {
         Ok "language model $model ready"
-        if (Test-Path $VPy) { & $VPy (Join-Path $Root "scripts\set_config.py") llm.model $model | Out-Host }
+        if (Test-Path $VPy) {
+            & $VPy (Join-Path $Root "scripts\set_config.py") llm.model $model | Out-Host
+            & $VPy (Join-Path $Root "scripts\set_config.py") llm.context_tokens $ctx | Out-Host
+        }
     } else { Warn "The language model could not be downloaded; JARVIS will reply with a short fallback until it is." }
 } else { Warn "Ollama could not be installed; conversation will use a short fallback until it is." }
 

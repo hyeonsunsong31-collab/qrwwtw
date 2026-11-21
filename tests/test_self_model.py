@@ -108,7 +108,10 @@ def test_errors_drift_then_repair_toward_the_directive_and_leave_a_lesson():
         assert sm.FEEDBACK in node.connections and "open_app" in me.nodes[sm.FEEDBACK].connections
         assert me.identity()["careful_with"] == ["open_app"]
         assert "apps" in me.describe("en") and "extra care" in me.describe("en")
-        assert "open_app" in me.prompt_context("en")
+        # the reminder rides on the turn (careful_note), never in the cached system prompt
+        assert me.careful_note("en") == "Take extra care with apps (recent mistakes there)."
+        assert "apps" in me.careful_note("ko") or "앱" in me.careful_note("ko")
+        assert "apps" not in me.prompt_context("en") and "open_app" not in me.prompt_context("en")
         # a refusal by the user is information, not an error
         before = me.nodes["music"].state if "music" in me.nodes else 0
         r = me.observe("play_music", "en", "denied")
@@ -130,7 +133,7 @@ def test_teach_forget_and_the_off_switch():
         assert me.teach("line one\nline two\x00\tend") == "line one line two end"   # single line, printable
         assert len(me.teach("x" * 5000)) == sm.MAX_FACT_CHARS
         ctx = me.prompt_context("en")
-        assert "call me Tony" in ctx and "The user asked you to remember" in ctx
+        assert "call me Tony" in ctx and "THE USER ASKED YOU TO REMEMBER" in ctx
         assert "\"call me Tony\"" in me.describe("en", "learned") or "call me Tony" in me.describe("en", "learned")
         # persistence across restarts
         again = fresh(d)
@@ -173,6 +176,23 @@ def test_self_description_in_both_languages():
         for text in (en, ko, purpose, learned, me.prompt_context("en"), me.prompt_context("ko")):
             low = text.lower()
             assert not any(w in low for w in ADVERSARIAL), text
+
+
+def test_system_prompt_block_is_stable_between_requests():
+    """The language model reuses its cache of an unchanged prompt prefix. In v1.3 this block
+    carried a request counter, so it changed every turn and the whole conversation had to be
+    re-read every time. Learning from requests must not change it; teaching may (rarely)."""
+    with tempfile.TemporaryDirectory() as d:
+        me = fresh(d)
+        me.teach("I prefer short answers")
+        before = {lang: me.prompt_context(lang) for lang in ("en", "ko")}
+        for intent, outcome in [("play_music", "success"), ("chat", "success"), ("open_app", "failed"),
+                                ("open_app", "failed"), ("open_app", "failed"), ("file_delete", "denied")] * 3:
+            me.observe(intent, "en", outcome)
+        assert {lang: me.prompt_context(lang) for lang in ("en", "ko")} == before
+        assert me.careful_note("en")                      # the dynamic part went to the turn note
+        me.teach("call me Tony")
+        assert me.prompt_context("en") != before["en"] and "call me Tony" in me.prompt_context("en")
 
 
 def test_everything_is_bounded():
