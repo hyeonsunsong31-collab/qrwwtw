@@ -20,6 +20,13 @@ ACCESS CONTROL
   http(s) Origin are rejected outright. This keeps the assistant's actions reachable
   only by the user's own JARVIS processes.
 
+START-UP (v1.4.1): the command bus claims its port first -- the configured one, or the next
+free one if another program holds it (8765 is a popular default) -- and records the port,
+its process id and its start-up phase in data/runtime.json, which the HUD, the launcher and
+the supervisor read. Nothing on the event loop waits for the network or for model loading,
+and the heavy warm-ups (speech, then the language model) run one after another in the
+background so they do not fight over the CPU.
+
 NOTE: no `from __future__ import annotations` here -- FastAPI must see the real Request /
 WebSocket classes (imported inside create_app), not unresolvable annotation strings.
 """
@@ -30,12 +37,15 @@ import json
 import os
 import re
 import secrets
+import socket
 import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Optional, Set
+
+_T_IMPORTS = time.time()          # before the heavy imports below (for the start-up timing line)
 
 from core.control_layer import ControlLayer
 from core.brain_mesh import build_mesh
@@ -45,7 +55,7 @@ from .orchestrator import Orchestrator
 from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM, keep_alive_value
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -103,6 +113,85 @@ def safe_filename(name: str, ext: str) -> str:
     return base
 
 
+PHASES = {
+    "starting": "starting up",
+    "neural-mesh": "building the neural mesh",
+    "agent": "loading the agent (skills, memory, language-model client)",
+    "listening": "ready",
+    "stopped": "stopped",
+    "failed": "failed",
+}
+
+
+class Runtime:
+    """data/runtime.json: this backend's process id, port and start-up phase, so the HUD,
+    the launcher and the supervisor know where to connect and what it is doing."""
+
+    def __init__(self, data_dir: str):
+        self.path = os.path.join(data_dir, "runtime.json")
+        self.body = {"pid": os.getpid(), "version": VERSION, "started": time.time(),
+                     "phase": "starting", "timings": {}}
+
+    def update(self, **fields) -> None:
+        self.body.update(fields)
+        self.body["updated"] = time.time()
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = f"{self.path}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(self.body, fh)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def phase(self, name: str, **fields) -> None:
+        self.body["timings"][name] = round(time.time() - self.body["started"], 2)
+        self.update(phase=name, phase_text=PHASES.get(name, name), **fields)
+
+
+def port_owner(port: int) -> str:
+    """'name (pid N)' of the process listening on a loopback port, or ''."""
+    try:
+        import psutil  # type: ignore
+        for c in psutil.net_connections(kind="tcp"):
+            if c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port and c.pid:
+                try:
+                    return f"{psutil.Process(c.pid).name()} (pid {c.pid})"
+                except Exception:
+                    return f"pid {c.pid}"
+    except Exception:
+        pass
+    return ""
+
+
+def bind_port(host: str, preferred: int, tries: int = 20):
+    """Bind the command bus: the preferred port, else the next free one, else any free port.
+    Returns (socket, port, note); note explains a fallback ('' when the preferred port was used).
+    Binding first means a port conflict costs a second instead of a failed start-up."""
+    last = None
+    candidates = [preferred] + [p for p in range(preferred + 1, preferred + tries) if p != 8799] + [0]
+    for port in candidates:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if sys.platform.startswith("win") and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)   # no port hijacking
+            else:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((host, port))
+            sock.listen(128)             # listening makes the claim exclusive on every OS
+        except OSError as e:
+            last = e
+            sock.close()
+            continue
+        got = sock.getsockname()[1]
+        if got == preferred:
+            return sock, got, ""
+        owner = port_owner(preferred)
+        why = f"in use by {owner}" if owner else f"not available ({last})"
+        return sock, got, f"port {preferred} is {why}; the command bus uses port {got} instead"
+    raise OSError(f"no free port for the command bus near {preferred}: {last}")
+
+
 class ConnectionManager:
     def __init__(self):
         self.active: Set = set()
@@ -126,7 +215,12 @@ class ConnectionManager:
 
 class JarvisServer:
     def __init__(self, config: Optional[dict] = None, data_dir: str = DATA_DIR,
-                 config_path: str = CONFIG_PATH, permissions_path: str = PERMISSIONS_PATH):
+                 config_path: str = CONFIG_PATH, permissions_path: str = PERMISSIONS_PATH,
+                 progress=None):
+        progress = progress or (lambda phase: None)
+        t0 = time.time()
+        self.runtime: Optional[Runtime] = None
+        self.port: Optional[int] = None
         self.config_path = config_path
         self.permissions_path = permissions_path
         self.config = config or load_config(config_path)
@@ -136,11 +230,15 @@ class JarvisServer:
 
         nc = self.config.get("neural_core", {})
         settle = int(nc.get("settle_steps", 10))
+        progress("neural-mesh")
+        t_mesh = time.time()
         # sized by RAM AND by a per-command time budget: the mesh settles on every command
         self.mesh = build_mesh(nc.get("active_neurons", "auto"),
                                latency_budget_ms=float(nc.get("latency_budget_ms", 60) or 0) or None,
                                settle_steps=settle, log=lambda m: print("[jarvis] " + m, flush=True),
                                remember=os.path.join(data_dir, "brain", "mesh_size.json"))
+        t_mesh = time.time() - t_mesh
+        progress("agent")
         self.control = ControlLayer(mesh=self.mesh, settle_steps=settle,
                                     state_dir=os.path.join(data_dir, "brain"))
         self.permissions = PermissionManager(config_path=permissions_path,
@@ -160,17 +258,19 @@ class JarvisServer:
         self.voice = None  # set by attach_voice()
         self.voice_state = "off"          # off | loading | online | unavailable | failed
         self.started_at = time.time()
+        self.startup = {"neural_mesh_s": round(t_mesh, 2), "init_s": round(time.time() - t0, 2)}
 
     # ------------------------------------------------------------- status #
     def status(self) -> dict:
         return {"ok": True, "version": VERSION, "pid": os.getpid(),
                 "uptime": round(time.time() - self.started_at, 1),
                 "overlay_clients": len(self.manager.active),
-                "llm": self.llm.model_name(), "llm_online": self.llm.online(),
+                "llm": self.llm.model_name(), "llm_online": self.llm.cached_online(),
                 "llm_state": self.llm.state, "llm_error": self.llm.error or None,
                 "llm_tokens_per_s": self.llm.stats.get("tokens_per_s"),
                 "llm_gpu": self.llm.stats.get("gpu"), "llm_load_seconds": self.llm.stats.get("load_seconds"),
                 "neural_settle_ms": getattr(self.mesh, "settle_ms", None),
+                "port": self.port, "startup": self.startup,
                 "voice": bool(self.voice), "voice_state": self.voice_state,
                 "listening": bool(self.voice and self.voice.listening),
                 "neurons_active": int(self.mesh.N),
@@ -387,16 +487,17 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
 
     srv = server or JarvisServer()
 
+    voice_done = asyncio.Event()      # the language-model warm-up waits for this (one at a time)
+
     async def start_voice_engine():
         """Load the speech models off the event loop. They can take from seconds to minutes
         (first run, slow disk), and the command bus must not wait for them: the overlay
         connects -- and typed commands work -- as soon as the server is up."""
         srv.voice_state = "loading"
         try:
-            from voice.engine import VoiceEngine
-            from agent.orchestrator import ACK
-
             def make():
+                from voice.engine import VoiceEngine          # imported here, off the event loop
+                from agent.orchestrator import ACK
                 engine = VoiceEngine(srv.config, on_wake=srv.wake,
                                      on_command=lambda text: srv.submit_command(text, source="voice"),
                                      on_interrupt=lambda: srv.interrupt(stop_speech=True),
@@ -425,12 +526,27 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
         except Exception as e:
             srv.voice_state = "failed"
             print(f"[jarvis] voice engine not started: {e!r}", flush=True)
+        finally:
+            voice_done.set()
         await srv.manager.broadcast({"type": "status", "status": srv.status()})
 
     async def keep_llm_warm():
         """Load the language model as soon as Ollama is up, read the system prompt into its
         cache, and load it again if Ollama restarts -- so a reply never waits for a cold model."""
         last = None
+        # learn at once whether Ollama is up (for the HUD), but load the model only after the
+        # speech models have loaded: on a laptop both at once take far longer than in turn
+        try:
+            await asyncio.to_thread(srv.llm.online)
+            await srv.manager.broadcast({"type": "status", "status": srv.status()})
+            await asyncio.wait_for(voice_done.wait(), timeout=45)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        if warm_llm:
+            from agent.skills import warm_up as warm_skills
+            asyncio.get_running_loop().run_in_executor(None, warm_skills)
         while True:
             try:
                 system = srv.orch.system_prompt(srv.orch.default_lang)
@@ -455,10 +571,11 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
         voice_task = None
         if start_voice and srv.config.get("voice", {}).get("enabled", True):
             voice_task = asyncio.create_task(start_voice_engine())
+        else:
+            voice_done.set()
         warm_task = asyncio.create_task(keep_llm_warm()) if warm_llm else None
-        if warm_llm:
-            from agent.skills import warm_up as warm_skills
-            asyncio.get_running_loop().run_in_executor(None, warm_skills)
+        if srv.runtime is not None:
+            srv.runtime.phase("listening")
         print(f"[jarvis] ready ({time.time() - srv.started_at:.1f}s)", flush=True)
         yield
         for task in (voice_task, warm_task):
@@ -466,6 +583,8 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
                 task.cancel()
         if srv.voice is not None:
             srv.voice.stop()
+        if srv.runtime is not None:
+            srv.runtime.phase("stopped")
 
     app = FastAPI(title="JARVIS", version=VERSION, lifespan=lifespan)
 
@@ -542,22 +661,51 @@ def _ensure_stdio():
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
 
 
+def _process_started() -> float:
+    try:
+        import psutil  # type: ignore
+        return psutil.Process().create_time()
+    except Exception:
+        return _T_IMPORTS
+
+
 def main():
     _ensure_stdio()
-    import uvicorn
+    t_main = time.time()
     print(f"[jarvis] backend {VERSION} starting (pid {os.getpid()}, python {sys.version.split()[0]})", flush=True)
     cfg = load_config()
-    srv = JarvisServer(cfg)
-    app = create_app(srv)
     s = cfg.get("server", {})
-    host = s.get("host", "127.0.0.1")
-    if host not in ("127.0.0.1", "localhost", "::1"):
+    if s.get("host", "127.0.0.1") not in ("127.0.0.1", "localhost"):
         print("[jarvis] refusing to bind the command bus to a non-loopback address; using 127.0.0.1")
-        host = "127.0.0.1"
-    port = int(s.get("port", 8765))
+    host = "127.0.0.1"                     # IPv4 loopback: what the HUD and the launcher connect to
+    runtime = Runtime(DATA_DIR)
+    # 1) claim a port before anything slow, so a conflict cannot stall the start-up
+    try:
+        sock, port, note = bind_port(host, int(s.get("port", 8765)))
+    except OSError as e:
+        runtime.phase("failed", error=str(e))
+        print(f"[jarvis] {e}", flush=True)
+        raise SystemExit(1)
+    runtime.update(port=port, port_note=note or None)
+    runtime.phase("starting")
+    if note:
+        print(f"[jarvis] {note}", flush=True)
+    import uvicorn
+    # 2) the brain itself
+    srv = JarvisServer(cfg, progress=runtime.phase)
+    srv.runtime, srv.port = runtime, port
+    app = create_app(srv)
+    started = _process_started()
+    srv.startup.update(python_and_imports_s=round(t_main - started, 2), total_s=round(time.time() - started, 2))
+    runtime.update(startup=srv.startup)
+    print(f"[jarvis] start-up: python + imports {t_main - started:.1f}s, neural mesh {srv.startup['neural_mesh_s']:.1f}s, "
+          f"agent {srv.startup['init_s'] - srv.startup['neural_mesh_s']:.1f}s -> serving after "
+          f"{time.time() - started:.1f}s", flush=True)
     print(f"[jarvis] command bus on ws://{host}:{port}/ws (token in data/session.token)", flush=True)
-    uvicorn.run(app, host=host, port=port, log_level="warning", use_colors=False,
-                ws_max_size=MAX_EXPORT_BYTES * 2)
+    # 3) serve on the socket claimed in step 1
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning", use_colors=False,
+                            ws_max_size=MAX_EXPORT_BYTES * 2)
+    uvicorn.Server(config).run(sockets=[sock])
 
 
 if __name__ == "__main__":

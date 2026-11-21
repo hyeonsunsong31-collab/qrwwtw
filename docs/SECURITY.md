@@ -5,7 +5,9 @@ JARVIS는 요구사항 20("PC의 모든 기능과 정보에 전면 접근")을 �
 기능은 없습니다.
 
 ## 1. 명령 버스 접근 제어 (v1.1)
-- 서버(`agent/server.py`)는 **127.0.0.1에만** 바인딩합니다(설정에 다른 주소가 있어도 거부하고 루프백 사용).
+- 서버(`agent/server.py`)는 **127.0.0.1에만** 바인딩합니다(설정에 다른 주소가 있어도 거부하고 루프백 사용). 설정 포트를 다른
+  프로그램이 쓰고 있어 다음 빈 포트로 옮길 때도 마찬가지이며(Windows에서는 `SO_EXCLUSIVEADDRUSE`로 가로채기 방지), 실제 포트는
+  `data/runtime.json`에 적힙니다. 이 파일에는 비밀 정보가 없고, 토큰은 여전히 `session.token`에만 있습니다.
 - 시작할 때마다 **새 무작위 토큰**을 `data/session.token`(현재 사용자 전용)에 씁니다. 모든 WebSocket 접속과
   `/status` `/neural/points` `/history` `/announce` HTTP 요청은 이 토큰이 있어야 합니다. 공개 엔드포인트는 `{"ok": true}`만
   돌려주는 `/health`(슈퍼바이저 감시용) 하나입니다. `/announce`는 HUD에 배너를 띄우는 것 외에 아무것도 하지 않습니다.

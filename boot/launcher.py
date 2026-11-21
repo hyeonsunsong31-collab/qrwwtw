@@ -53,7 +53,7 @@ EXIT_OK, EXIT_FAILED, EXIT_NEEDS_INSTALL = 0, 1, 3
 
 T_SUPERVISOR = 25        # seconds for the background service to report in
 T_OVERLAY = 75           # ... for the HUD window to be on screen
-T_BACKEND = 240          # ... for the brain to answer (first start builds the neural mesh)
+T_BACKEND = 180          # ... for the brain to answer (it reports its phase while starting)
 T_CONNECT = 45           # ... for the HUD to connect to the brain once both are up
 
 
@@ -244,6 +244,8 @@ def wait_ready(proc: Optional[subprocess.Popen] = None, started_after: Optional[
     last_note = t_start
     both_since = 0.0
     foreign_since = 0.0
+    prev_starts = None
+    port_noted = False
 
     def fail(reason: str, detail: str = "") -> Tuple[bool, dict]:
         ctx["reason"], ctx["detail"] = reason, detail
@@ -269,6 +271,20 @@ def wait_ready(proc: Optional[subprocess.Popen] = None, started_after: Optional[
             elif waited > T_SUPERVISOR * scale:
                 return fail("supervisor_silent")
 
+        # what the brain is doing (data/runtime.json) and whether it had to restart
+        rt = common.read_runtime() if sup_alive else {}
+        ctx["runtime"] = rt
+        bchild = (sup.get("children") or {}).get("backend") or {}
+        if rt.get("port_note") and not port_noted:
+            port_noted = True
+            note(rt["port_note"])
+        starts = int(bchild.get("starts") or 0)
+        if prev_starts is not None and prev_starts >= 1 and starts > prev_starts and "backend" not in done:
+            last = last_error_line(common.tail(log_path("backend.log"), 30))
+            note(f"the brain stopped (code {bchild.get('last_exit')}) and is starting again"
+                 + (f" - last message: {last[:160]}" if last else ""))
+        prev_starts = starts
+
         problems = {p.get("id"): p.get("text", "") for p in (sup.get("problems") or [])} if sup_alive else {}
         ctx["problems"] = problems
         for key in ("stale_processes", "backend_crashloop", "overlay_crashloop"):
@@ -291,7 +307,9 @@ def wait_ready(proc: Optional[subprocess.Popen] = None, started_after: Optional[
         if bstate == "ok" and "backend" not in done:
             done["backend"] = waited
             n = int((bstatus or {}).get("neurons_active") or 0)
-            ok(f"the brain is online (version {(bstatus or {}).get('version', '?')}, {n:,} active neurons)")
+            took = ((bstatus or {}).get("startup") or {}).get("total_s")
+            ok(f"the brain is online (version {(bstatus or {}).get('version', '?')}, {n:,} active neurons"
+               + (f", started in {took:.0f} s" if isinstance(took, (int, float)) else "") + ")")
         if bstate == "foreign":
             foreign_since = foreign_since or now
             if now - foreign_since > 20:
@@ -316,9 +334,14 @@ def wait_ready(proc: Optional[subprocess.Popen] = None, started_after: Optional[
 
         if now - last_note >= 12:
             last_note = now
+            brain = "the brain"
+            if rt.get("phase") and rt.get("phase") != "listening":
+                brain = f"the brain ({rt.get('phase_text') or rt.get('phase')})"
+            elif not rt:
+                brain = "the brain to start"
             waiting_for = ("the background service" if "supervisor" not in done else
                            "the HUD window" if "overlay" not in done else
-                           "the brain (first start can take a minute)" if "backend" not in done else
+                           brain if "backend" not in done else
                            "the HUD to connect")
             if "overlay runtime is being installed" in problems.get("overlay_runtime", ""):
                 waiting_for = "the on-screen display to finish downloading"
@@ -479,6 +502,7 @@ def build_report(ctx: dict, what: str, todo: str) -> str:
     add("")
     add("RUNNING")
     add(f"  supervisor.json : {common.read_json(common.status_file())}")
+    add(f"  runtime.json    : {common.read_json(common.runtime_file())}")
     add(f"  overlay.json    : {common.read_json(common.overlay_state_file())}")
     bstate, bstatus = common.backend_status()
     add(f"  backend         : {bstate} {bstatus or ''}")
@@ -542,6 +566,10 @@ def report_success(status: dict, already: bool) -> int:
     say("     * JARVIS keeps running in the background. To quit it, right-click the")
     say("       JARVIS icon next to the clock and choose Quit JARVIS.")
     notes = []
+    port_note = common.read_runtime().get("port_note")
+    if port_note:
+        notes.append("Port note: " + port_note[0].upper() + port_note[1:] + ". Nothing to do - JARVIS found "
+                     "a free port by itself.")
     tps, gpu = status.get("llm_tokens_per_s"), status.get("llm_gpu")
     if status.get("llm_online") is False:
         notes.append("The language model (Ollama) is not running yet, so replies are basic. "

@@ -56,9 +56,10 @@ except Exception:                                   # a broken or half-extracted
 
 IS_WIN = common.IS_WIN
 OLLAMA_URL = "http://127.0.0.1:11434/api/tags"
-FAST_EXIT_SECONDS = 8            # a child that dies this quickly did not really start
-CRASHLOOP_AFTER = 5              # this many quick deaths in a row = something is broken
-HEALTH_GRACE_SECONDS = 120       # model loading time before /health is expected to answer
+CRASHLOOP_AFTER = 3              # this many starts in a row that never got ready = something is broken
+HUNG_AFTER_CHECKS = 4            # a backend that WAS answering and then misses this many checks is hung
+SLOW_START_NOTE_SECONDS = 60     # log what a still-starting backend is doing this often
+UNSTABLE_SECONDS = 120           # a child that dies this soon after getting ready did not really work
 
 _log_lock = threading.Lock()
 
@@ -115,14 +116,19 @@ class Child:
         self.last_exit: Optional[int] = None
         self.backoff = 1.0
         self.next_try = 0.0
-        self.fast_failures = 0
+        self.ready = False               # this run became ready (backend answering / HUD loaded)
+        self.ready_after: Optional[float] = None
+        self.failed_starts = 0           # runs in a row that ended before they ever got ready
+        self.unstable = 0                # runs in a row that died soon after getting ready
+        self.last_note = 0.0
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
     def info(self) -> dict:
         return {"pid": self.proc.pid if self.proc else None, "alive": self.alive(),
-                "starts": self.starts, "last_exit": self.last_exit,
+                "starts": self.starts, "last_exit": self.last_exit, "ready": self.ready,
+                "ready_after": self.ready_after, "failed_starts": self.failed_starts,
                 "started": self.started or None, "log": self.log_path}
 
 
@@ -194,6 +200,7 @@ class Supervisor:
             child.started = time.time()
             child.starts += 1
             child.last_exit = None
+            child.ready, child.ready_after, child.last_note = False, None, time.time()
             log(f"started {child.name} (pid {child.proc.pid}): {' '.join(cmd)}")
         except Exception as e:
             child.proc = None
@@ -224,15 +231,25 @@ class Supervisor:
         if child.name == "overlay" and code == common.QUIT_EXIT_CODE:
             log("the overlay was closed with 'Quit JARVIS'; shutting everything down")
             return False
-        if lived < FAST_EXIT_SECONDS:
-            child.fast_failures += 1
+        # a run that ended before it ever got ready is a failed start, however long it took:
+        # on a slow first start a time-based rule ("died within 8 s") never fired
+        if child.ready:
+            child.failed_starts, child.backoff = 0, 1.0
+            ready_for = lived - (child.ready_after or 0)
+            child.unstable = child.unstable + 1 if ready_for < UNSTABLE_SECONDS else 0
+            if child.unstable < CRASHLOOP_AFTER:
+                self.clear_problem(f"{child.name}_crashloop")
         else:
-            child.fast_failures, child.backoff = 0, 1.0
-            self.clear_problem(f"{child.name}_crashloop")
+            child.failed_starts += 1
         last = " | ".join(ln for ln in common.tail(child.log_path, 4) if not ln.startswith("====="))[-400:]
-        log(f"{child.name} exited with code {code} after {lived:.0f}s; restarting in {child.backoff:.0f}s"
+        log(f"{child.name} exited with code {code} after {lived:.0f}s"
+            + ("" if child.ready else " before it was ready") + f"; restarting in {child.backoff:.0f}s"
             + (f" -- last output: {last}" if last else ""))
-        if child.fast_failures >= CRASHLOOP_AFTER:
+        if child.unstable >= CRASHLOOP_AFTER:
+            self.set_problem(f"{child.name}_crashloop",
+                             f"the {child.name} keeps stopping within two minutes of starting (code {code}); "
+                             f"see {child.log_path}")
+        if child.failed_starts >= CRASHLOOP_AFTER:
             what = "on-screen display (overlay)" if child.name == "overlay" else "brain (backend)"
             hint = ("\n\nIf it keeps happening, try START_JARVIS_SAFE_GRAPHICS.bat."
                     if child.name == "overlay" else "")
@@ -241,8 +258,36 @@ class Supervisor:
                              popup=f"JARVIS's {what} keeps stopping right after it starts.\n\n"
                                    f"Double-click START_JARVIS.bat to see the reason.{hint}")
         child.next_try = time.time() + child.backoff
-        child.backoff = min(60.0 if child.fast_failures >= CRASHLOOP_AFTER else 30.0, child.backoff * 2)
+        child.backoff = min(60.0 if child.failed_starts >= CRASHLOOP_AFTER else 30.0, child.backoff * 2)
         return True
+
+    # --------------------------------------------------------------- ready #
+    def _check_ready(self, child: Child) -> None:
+        """Mark a running child ready once it really works: the backend answers /health
+        (after it reports "listening" in data/runtime.json), the HUD has loaded."""
+        if child.ready or not child.alive():
+            return
+        now = time.time()
+        if child.name == "backend":
+            rt = common.read_runtime()
+            fresh = rt and float(rt.get("started") or 0) >= child.started - 5
+            if fresh and rt.get("phase") == "listening" and common.backend_health() is not None:
+                child.ready = True
+            elif now - child.last_note >= SLOW_START_NOTE_SECONDS:
+                child.last_note = now
+                phase = (rt.get("phase_text") or rt.get("phase")) if fresh else "not started yet"
+                log(f"the backend is still starting after {now - child.started:.0f}s (phase: {phase})")
+        elif child.name == "overlay":
+            ov = common.read_json(common.overlay_state_file(), {}) or {}
+            if ov.get("loaded") and float(ov.get("startedAt") or 0) / 1000.0 >= child.started - 5:
+                child.ready = True
+        else:
+            child.ready = now - child.started > 10
+        if child.ready:
+            child.ready_after = round(now - child.started, 1)
+            child.failed_starts, child.backoff = 0, 1.0
+            self.clear_problem(f"{child.name}_crashloop")
+            log(f"{child.name} ready after {child.ready_after:.1f}s")
 
     # ------------------------------------------------------ overlay runtime #
     def _repair_overlay_runtime(self) -> None:
@@ -275,16 +320,18 @@ class Supervisor:
 
     # --------------------------------------------------------------- health #
     def _check_backend_health(self) -> None:
+        """Restart a backend that WAS answering and stopped (hung). A backend that is still
+        starting is never killed: a slow first start would otherwise restart forever."""
         child = self.children["backend"]
-        if not child.alive() or time.time() - child.started < HEALTH_GRACE_SECONDS:
+        if not child.alive() or not child.ready:
             return
         if common.backend_health() is not None:
             self._health_fail = 0
             return
         self._health_fail += 1
-        if self._health_fail >= 3:
+        if self._health_fail >= HUNG_AFTER_CHECKS:
             self._health_fail = 0
-            log("the backend is running but not answering /health; restarting it")
+            log("the backend stopped answering /health; restarting it")
             self._kill(child)
 
     def _ensure_ollama(self) -> None:
@@ -317,6 +364,8 @@ class Supervisor:
                 if child.name == "overlay" and not self._overlay_ready():
                     continue
                 self._spawn(child)
+            elif not child.ready:
+                self._check_ready(child)
         return True
 
     def monitor(self) -> None:

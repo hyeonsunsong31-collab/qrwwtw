@@ -293,6 +293,11 @@ class ResilientLLM:
                     self._resolved = True
             return self._online
 
+    def cached_online(self) -> bool:
+        """The last known answer, without asking Ollama. For status reads on the event loop:
+        a network call there would stall every request while Ollama is busy loading."""
+        return self._online
+
     def _mark_offline(self):
         with self._lock:
             self._online = False

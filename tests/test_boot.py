@@ -67,7 +67,6 @@ class Sandbox:
         os.environ["JARVIS_DATA"] = os.path.join(self.dir, "data")
         os.environ["JARVIS_CONFIG"] = cfg_path
         os.environ["JARVIS_PERMISSIONS"] = perm
-        common._port_cache = None
         return self
 
     def __exit__(self, *exc):
@@ -76,7 +75,6 @@ class Sandbox:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-        common._port_cache = None
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
@@ -313,7 +311,7 @@ def test_supervisor_flags_a_crash_loop_and_honours_quit():
                 assert sup.step() is True                      # spawn
                 child.proc.wait(timeout=20)
                 assert sup.step() is True                      # notice the exit
-            assert child.last_exit == 7 and child.fast_failures >= service.CRASHLOOP_AFTER
+            assert child.last_exit == 7 and child.failed_starts >= service.CRASHLOOP_AFTER
             assert "backend_crashloop" in sup.problems, sup.problems
             sup.write_status(force=True)
             ids = [p["id"] for p in common.read_json(common.status_file())["problems"]]

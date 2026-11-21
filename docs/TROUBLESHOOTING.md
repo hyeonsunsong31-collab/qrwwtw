@@ -56,6 +56,7 @@ v1.3부터 `START_JARVIS.bat`은 **시작을 요청만 하지 않고, 실제로 
 | `overlay.log` | Electron 자체의 출력 |
 | `..\install.log` | 설치 기록 |
 | `..\supervisor.json`, `..\overlay.json` | 현재 상태(START가 확인하는 파일) |
+| `..\runtime.json` | 두뇌가 실제로 쓰는 포트, 프로세스, 시작 단계와 단계별 시간 |
 
 ## 그 밖의 명령
 ```
@@ -66,6 +67,19 @@ START_JARVIS.bat --normal-graphics  소프트웨어 렌더링 해제
 STOP_JARVIS.bat                     지금 종료(로그온 자동 시작은 유지)
 UNINSTALL_JARVIS.bat                자동 시작 제거 + 종료
 ```
+
+## 두뇌가 늦게 뜨거나 "still waiting for the brain"이 계속될 때 (v1.4.1)
+
+v1.4.1부터 START 창은 기다리는 동안 두뇌가 **지금 무엇을 하는지** 보여 줍니다
+(`still waiting for the brain (building the neural mesh)` 같은 식). 보통은 몇 초 안에
+`the brain is online (…, started in 2 s)`가 나옵니다.
+
+- `port 8765 is in use by … ; the command bus uses port 8766 instead` → 다른 프로그램(예: Anki의 AnkiConnect)이
+  8765를 쓰고 있어서 두뇌가 **스스로 다른 포트로 옮겼다**는 뜻입니다. 할 일은 없습니다.
+- `the brain stopped (code …) and is starting again - last message: …` → 두뇌가 시작 중에 꺼졌습니다. 같은 일이 3번
+  반복되면 START가 원인과 할 일을 알려 줍니다(대부분 `INSTALL_JARVIS.bat` 재실행으로 해결).
+- 두뇌가 어디까지 왔는지는 `data\runtime.json`(포트, 프로세스, 단계, 단계별 시간)과 `data\logs\backend.log`의
+  `start-up:` 줄에 있습니다. 문제를 알려 주실 때 `data\logs\diagnostics.txt`와 함께 보내 주세요.
 
 ## 답이 늦게 나올 때 (v1.4)
 

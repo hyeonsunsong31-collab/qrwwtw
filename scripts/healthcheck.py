@@ -1,5 +1,5 @@
 """
-scripts/healthcheck.py — verify the JARVIS codebase and report what's ready.
+scripts/healthcheck.py - verify the JARVIS codebase and report what's ready.
 
     python scripts/healthcheck.py
 
@@ -128,17 +128,24 @@ def check_optional():
     }
     for mod, what in powers.items():
         present = importlib.util.find_spec(mod) is not None
-        (ok if present else warn)(f"{mod:16s} {'present' if present else 'absent '} — {what}")
+        (ok if present else warn)(f"{mod:16s} {'present' if present else 'absent '} - {what}")
     # Ollama is a native service, not a module
     try:
         import httpx
         httpx.get("http://127.0.0.1:11434/api/tags", timeout=1.5)
         ok("ollama           reachable at 127.0.0.1:11434")
     except Exception:
-        warn("ollama           not reachable — offline fallback replies until it's running")
+        warn("ollama           not reachable - offline fallback replies until it's running")
 
 
 def main():
+    # The installer pipes this output; Windows then encodes it in the system code page (cp949
+    # on Korean Windows), which has no em dash -- v1.4 crashed there. Never fail on a character.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
     print("JARVIS health check")
     print("=" * 60)
     results = [check_config(), check_imports(), check_core()]
