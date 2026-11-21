@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
 from .wakeword import make_detector, heard_wake, heard_keyword
@@ -35,6 +36,7 @@ END_SILENCE_FRAMES = 30          # default: 0.6 s of silence ends a command (voi
 MAX_CAPTURE_FRAMES = 750         # 15 s cap
 NO_SPEECH_FRAMES = 300           # give up after 6 s without speech
 PARTIAL_KEYWORD_FRAMES = 4       # a keyword must persist this many frames in a partial result
+MAX_BACKLOG_FRAMES = 50          # 1 s: if wake detection falls this far behind, skip ahead
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -61,6 +63,9 @@ class VoiceEngine:
         self._frames: Optional[asyncio.Queue] = None
         self._speech: Optional[asyncio.Queue] = None
         self._speech_gen = 0           # bumped by stop_speaking(): older queued items are dropped
+        # wake-word / keyword recognition runs here, not on the event loop: on a busy CPU it
+        # would otherwise hold up every request the command bus serves
+        self._audio_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jarvis-audio")
         self.end_silence_frames = END_SILENCE_FRAMES
         try:
             import sounddevice as sd  # type: ignore
@@ -283,8 +288,16 @@ class VoiceEngine:
                 except asyncio.TimeoutError:
                     continue
 
+                if self.state == "idle" and self._frames.qsize() > MAX_BACKLOG_FRAMES:
+                    # recognition fell behind (CPU busy): keep the last 0.2 s and carry on
+                    while self._frames.qsize() > 10:
+                        self._frames.get_nowait()
+                    if self.detector:
+                        self.detector.reset()
+                    continue
+
                 if self.state == "idle":
-                    res = self.detector.process(frame) if self.detector else None
+                    res = await self._detect(frame)
                     if res and heard_wake(res[0], self.lenient):
                         self.detector.reset()
                         await _maybe_await(self.on_wake())
@@ -312,9 +325,9 @@ class VoiceEngine:
             return self.vad.feed(frame)
         # keyword mode
         if not self.detector or not getattr(self.detector, "knows_keywords", False):
-            res = self.detector.process(frame) if self.detector else None
+            res = await self._detect(frame)
             return bool(res and heard_wake(res[0], lenient=True))
-        res = self.detector.process(frame)
+        res = await self._detect(frame)
         if not res:
             return False
         text, final = res
@@ -327,6 +340,11 @@ class VoiceEngine:
             return True
         kw_hits[kw] = kw_hits.get(kw, 0) + 1
         return kw_hits[kw] >= PARTIAL_KEYWORD_FRAMES
+
+    async def _detect(self, frame: bytes):
+        if not self.detector:
+            return None
+        return await self._loop.run_in_executor(self._audio_pool, self.detector.process, frame)
 
     async def _capture_frame(self, frame: bytes):
         self._cap += frame

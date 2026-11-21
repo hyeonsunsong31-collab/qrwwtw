@@ -1,4 +1,4 @@
-# 아키텍처 (v1.4.0)
+# 아키텍처 (v1.4.1)
 
 ## 구성 요소
 ```
@@ -38,6 +38,13 @@ START_JARVIS.bat ─► boot/launcher.py
   파이썬, 백엔드는 JARVIS 폴더에서 `-m agent.server`인 파이썬, 오버레이는 JARVIS 폴더 안의 Electron 실행 파일, 음악 재생기는
   JARVIS가 붙인 창 제목이 있는 것만 해당합니다. 사용자가 JARVIS로 연 앱은 건드리지 않습니다.
 - **오버레이 → 슈퍼바이저 신호**: 종료 코드 42 = 사용자가 Quit JARVIS를 선택(전체 종료), 그 외 종료 = 재시작(백오프).
+- **두뇌의 포트와 단계 (v1.4.1)**: 백엔드는 무거운 초기화 전에 포트부터 잡고(`bind_port`: 설정 포트 → 다음 빈 포트 → 아무 빈 포트,
+  잡자마자 listen) `data/runtime.json`에 `{pid, port, phase, timings, port_note}`를 씁니다. HUD(`main.js backendPort`),
+  START·슈퍼바이저(`boot/common.py backend_port`)는 이 파일의 포트를 쓰고, 프로세스가 없으면 설정 포트로 돌아갑니다. 잡은 소켓은
+  `uvicorn.Server.run(sockets=[sock])`로 넘깁니다.
+- **준비 판정 (v1.4.1)**: 슈퍼바이저는 자식이 *준비*됐는지 봅니다(백엔드: `runtime.json` 단계가 listening이고 /health 응답,
+  HUD: overlay.json loaded). 준비 전에 끝난 실행은 시간과 무관하게 실패한 시작(3번 → 알림), 준비 후 2분 안에 끝나는 일이 반복돼도 알림.
+  /health 감시는 한 번이라도 준비됐던 백엔드만 대상으로 하고(4번 연속 무응답 → 재시작), 시작 중인 백엔드는 죽이지 않습니다.
 - **콘솔 없는 실행**: `pythonw.exe`에는 stdout/stderr가 없습니다. 슈퍼바이저·백엔드 모두 이를 대체하고, 자식 출력은 파일로 보냅니다.
 
 ## 응답 속도 (v1.4) — 명령에서 첫 음성까지의 경로

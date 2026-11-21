@@ -152,18 +152,34 @@ def rotate(path: str, max_bytes: int = 2 * 1024 * 1024) -> None:
 
 
 # --------------------------------------------------------------------------- backend
-_port_cache: Optional[int] = None
+def runtime_file() -> str:
+    return os.path.join(data_dir(), "runtime.json")
+
+
+def read_runtime() -> dict:
+    """The running backend's data/runtime.json (port, pid, start-up phase), or {} if there is
+    none or the process that wrote it is gone."""
+    rt = read_json(runtime_file(), {}) or {}
+    if not isinstance(rt, dict) or not pid_alive(rt.get("pid")):
+        return {}
+    return rt
+
+
+def configured_port() -> int:
+    cfg = read_json(config_path(), {}) or {}
+    try:
+        return int((cfg.get("server") or {}).get("port", DEFAULT_PORT))
+    except (TypeError, ValueError):
+        return DEFAULT_PORT
 
 
 def backend_port() -> int:
-    global _port_cache
-    if _port_cache is None:
-        cfg = read_json(config_path(), {}) or {}
-        try:
-            _port_cache = int((cfg.get("server") or {}).get("port", DEFAULT_PORT))
-        except (TypeError, ValueError):
-            _port_cache = DEFAULT_PORT
-    return _port_cache
+    """Where the command bus is: the port the running backend actually took (it moves to the
+    next free port when another program holds the configured one), else the configured one."""
+    port = read_runtime().get("port")
+    if isinstance(port, int) and 0 < port < 65536:
+        return port
+    return configured_port()
 
 
 def backend_url(path: str = "") -> str:

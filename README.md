@@ -118,7 +118,8 @@ overlay/   Electron 홀로그램 HUD · Three.js 3D 공간 · MediaPipe 손동�
 boot/      자동시작 등록 · 자가복구 슈퍼바이저(jarvis_service.py) · 시작 확인 런처(launcher.py) ·
            화면 표시부 런타임 설치(overlay_runtime.py) · 공용 도구(common.py)
 scripts/   setup_windows.ps1(설치) · healthcheck.py · mock_run.py · set_config.py
-tests/     단위 · 음성 엔진 · 실서버 E2E · 시작 체인(test_boot) · 자기 코어(test_self_model) · 응답 속도(test_speed) 테스트
+tests/     단위 · 음성 엔진 · 실서버 E2E · 시작 체인(test_boot) · 자기 코어(test_self_model) · 응답 속도(test_speed) ·
+           두뇌 시작(test_startup) 테스트
 docs/      ARCHITECTURE · REQUIREMENTS_MAP · SECURITY · WAKE_WORD · DRIVE · SELF_MODEL · TROUBLESHOOTING
 INSTALL_JARVIS.bat · START_JARVIS.bat · STOP_JARVIS.bat · START_JARVIS_SAFE_GRAPHICS.bat · UNINSTALL_JARVIS.bat
 ```
@@ -140,6 +141,7 @@ python tests/test_drive.py             # 동기 코어와 안전 불변식
 python tests/test_self_model.py        # 자기 코어: 고정 지침·학습·가르치기·잊기·안전 불변식·오케스트레이터 통합
 python tests/test_boot.py              # 시작 체인: 콘솔 없는 실행, 슈퍼바이저 재시작·크래시 루프·종료, 런타임 검증, 런처 진단
 python tests/test_speed.py             # 응답 속도: 메시 예산·동일성, 모델 유지·예열, 캐시 친화 프롬프트, 음성 파이프라인
+python tests/test_startup.py           # 두뇌 시작: 포트 충돌 시 자동 이동, 시작 단계, 막히지 않는 /status, 슈퍼바이저 준비 판정
 python scripts/mock_run.py             # Ollama·오디오 없이 명령 버스 전체 경로
 python boot/launcher.py --status       # 지금 무엇이 떠 있는지
 ```

@@ -28,6 +28,7 @@ const LOG_DIR = path.join(DATA, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'overlay-main.log');
 const TOKEN_FILE = path.join(DATA, 'session.token');
 const STATE_FILE = path.join(DATA, 'overlay.json');
+const RUNTIME_FILE = path.join(DATA, 'runtime.json');   // the backend's port, pid and start-up phase
 const SAFE_FLAG = path.join(DATA, 'overlay.safe-graphics');
 const CONFIG_FILE = process.env.JARVIS_CONFIG || path.join(ROOT, 'config', 'jarvis.config.json');
 const WORKERW = path.join(__dirname, 'native', 'workerw.ps1');
@@ -219,8 +220,18 @@ function createHud() {
 function readToken() {
   try { return fs.readFileSync(TOKEN_FILE, 'utf8').trim(); } catch (e) { return ''; }
 }
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+/* The port the running backend actually took (it moves to the next free port when another
+ * program holds the configured one), else the configured port. */
 function backendPort() {
-  const p = Number(readConfig().server && readConfig().server.port);
+  try {
+    const rt = JSON.parse(fs.readFileSync(RUNTIME_FILE, 'utf8'));
+    if (Number.isInteger(rt.port) && rt.port > 0 && rt.port < 65536 && pidAlive(rt.pid)) return rt.port;
+  } catch (e) { /* no backend has started yet */ }
+  const cfg = readConfig();
+  const p = Number(cfg.server && cfg.server.port);
   return Number.isInteger(p) && p > 0 && p < 65536 ? p : 8765;
 }
 ipcMain.handle('jarvis:token', () => readToken());

@@ -1,4 +1,4 @@
-# 요구사항 → 구현 매핑 (v1.4.0)
+# 요구사항 → 구현 매핑 (v1.4.1)
 
 사용자가 제시한 21개 요구사항 + 추가 2개를 어디서/어떻게 구현했는지, 그리고 **어떻게 검증했는지**를 기록합니다.
 
@@ -53,7 +53,7 @@
 
 ## 빌드 호스트에서 실행한 검증
 - `tests/test_core.py` 7/7 · `tests/test_phase2.py` 7/7 · `tests/test_drive.py` 7/7 · `tests/test_voice_engine.py` 5/5 ·
-  `tests/test_self_model.py` 10/10 · `tests/test_boot.py` 15/15 · `tests/test_speed.py` 16/16 · `scripts/mock_run.py` · `scripts/healthcheck.py`.
+  `tests/test_self_model.py` 10/10 · `tests/test_boot.py` 15/15 · `tests/test_speed.py` 16/16 · `tests/test_startup.py` 9/9 · `scripts/mock_run.py` · `scripts/healthcheck.py`.
 - `tests/test_server_e2e.py` — 실제 uvicorn 서버: 토큰 없는/잘못된/웹 Origin 접속 거부, 명령→UI 이벤트, 스트리밍(28 델타·3문장),
   한국어 응답, 권한 거부 왕복, 3D 저장·불러오기·.glb 내보내기(경로 조작 무력화), 설정 적용·잠긴 권한 거부, 신경망 점, 기록, 감사 로그.
 - **실제 Electron 앱** + 실제 서버 E2E 19개 시나리오(시작 배너·창 상태·세션 전달·WAKE·3D·내보내기·신경망·스트리밍·자기 코어·
