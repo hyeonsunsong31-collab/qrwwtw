@@ -122,6 +122,17 @@ def _rules():
                         r"\b(put on|play me|play some)\b\s+(?P<query>.+)$",
                         r"(?P<query>.+?)\s*(노래|음악|곡)?\s*(틀어|재생|들려|플레이)\s*(줘|주라|해)?$"]),
         # ---------------- microphone / volume / media ----------------
+        ("mic_settings", [r"\b(open|show|go to)\b.*\b(mic|microphone)\b.*\b(privacy|permission|access|settings?)\b",
+                          r"\b(mic|microphone)\s+(privacy|permission|access)\b",
+                          r"마이크.*(개인\s*정보|권한|설정).*(열어|보여|가|띄워)"]),
+        ("voice_status", [r"\b(check|test|diagnose|troubleshoot|fix)\b.*\b(mic|microphone|voice|hearing|audio input|wake ?word)\b",
+                          r"\bcan you hear me\b", r"\bare you (listening|hearing me)\b",
+                          r"\b(mic|microphone|voice|wake ?word)\s+(status|check|test|problems?)\b",
+                          r"\bwhy (can'?t|cannot|don'?t|do not|won'?t|aren'?t) you (hear|listen|respond|wake)\b",
+                          r"\b(voice|wake ?word|microphone|mic)\b.*\b(not working|isn'?t working|doesn'?t work|does not work)\b",
+                          r"마이크.*(확인|테스트|점검|상태|안\s*돼|안돼|안\s*되|작동|문제)",
+                          r"(내\s*)?(말|목소리).*(들려|들리|들립)",
+                          r"(음성\s*인식|음성|호출어|웨이크).*(확인|테스트|점검|안\s*돼|안돼|안\s*되|상태|문제)"]),
         ("mute_mic", [r"\b(mute|turn off)\b.*\b(mic|microphone)\b", r"(마이크|마이크로폰).*(음소거|꺼|끄기)"]),
         ("unmute_mic", [r"\b(unmute|turn on)\b.*\b(mic|microphone)\b", r"(마이크|마이크로폰).*(켜|음소거\s*해제)"]),
         ("set_volume", [r"\b(set|turn)\b.*\bvolume\b.*?(?P<level>\d{1,3})\s*%?",
@@ -173,7 +184,7 @@ def _rules():
 
 _COMPILED = [(name, [re.compile(p, re.IGNORECASE) for p in pats]) for name, pats in _rules()]
 _STOPWORDS_APP = {"the", "my", "me", "please", "now", "a", "an", "up", "로", "을", "를", "좀"}
-_NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "stop_music", "open_space3d", "close_space3d",
+_NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "voice_status", "mic_settings", "stop_music", "open_space3d", "close_space3d",
                    "clone_object", "system_info", "sleep_assistant", "delete_object",
                    "save_project", "export_model", "neural_view", "wallpaper_on", "wallpaper_off",
                    "open_jarvis_settings", "screenshot", "show_desktop", "toggle_gesture",

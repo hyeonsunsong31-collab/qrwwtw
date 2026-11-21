@@ -16,6 +16,9 @@ const ring = document.getElementById("state-ring");
 const stateLabel = document.getElementById("state-label");
 const connDot = document.getElementById("conn-dot");
 const neuralReadout = document.getElementById("neural-readout");
+const voiceBadge = document.getElementById("voice-badge");
+const voiceBadgeText = document.getElementById("voice-badge-text");
+const micLevel = document.getElementById("mic-level");
 
 function setState(s) {
   ring.dataset.state = s === "capture" ? "listening" : s;
@@ -183,12 +186,24 @@ function toastHost() {
 }
 const esc = (s) => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-function toast(title, body, kind = "", ms = 6000) {
+function toast(title, body, kind = "", ms = 6000, opts = {}) {
   const el = document.createElement("div");
   el.className = "toast " + kind;
-  el.innerHTML = `<h4>${esc(title)}</h4><p>${esc(body)}</p>`;
+  el.innerHTML = `<h4>${esc(title)}</h4><p>${esc(body)}</p>` + (opts.fix ? `<p class="fix">${esc(opts.fix)}</p>` : "");
+  const actions = [];
+  const page = { "ms-settings:privacy-microphone": "privacy-microphone", "ms-settings:sound": "sound" }[opts.action];
+  if (page) actions.push([t("open_fix"), () => bus.send({ type: "open_settings_page", page })]);
+  if (opts.check) actions.push([t("check_mic"), () => { chat.show(); bus.command(getLang() === "ko" ? "마이크 확인해 줘" : "check the microphone", "text"); }]);
+  if (actions.length) {
+    const row = document.createElement("div"); row.className = "row";
+    actions.forEach(([label, fn]) => { const b = document.createElement("button"); b.textContent = label;
+      b.addEventListener("click", () => { fn(); el.remove(); if (window.jarvis) window.jarvis.setClickThrough(true); });
+      row.appendChild(b); });
+    el.appendChild(row);
+  }
   toastHost().appendChild(el); makeInteractive(el);
   setTimeout(() => el.remove(), ms);
+  return el;
 }
 
 function permissionToast(msg) {
@@ -227,6 +242,81 @@ function renderDisposition(state) {
   if (ring) ring.title = `${disposition.label || "JARVIS"} — ${disposition.drive || ""}`;
 }
 
+/* ---------------------------------------------- voice status + microphone (v1.4.2) ---- */
+function renderVoice() {
+  if (!voiceBadge) return;
+  const d = status.voice_detail || null, ko = getLang() === "ko";
+  let cls = "off", label = t("voice_off");
+  const tip = [t("voice_check_tip")];
+  if (!status.voice) {
+    if (status.voice_state === "loading") { cls = "loading"; label = t("voice_loading"); }
+    else if (status.voice_state === "failed" || status.voice_state === "unavailable") {
+      cls = "bad"; label = t("voice_bad"); tip.push(status.voice_error || status.voice_state);
+    }
+  } else if (d) {
+    const blocking = (d.problems || []).find((p) => p.blocking);
+    const wakeOk = d.wake && d.wake.ready, stt = (d.stt && d.stt.state) || "loading";
+    if (d.listening === false) { cls = "off"; label = t("voice_muted"); }
+    else if (blocking) { cls = "bad"; label = t("voice_bad"); tip.push(ko ? blocking.message_ko : blocking.message); }
+    else if (stt === "failed" || (!wakeOk && d.wake && d.wake.error && d.wake.error !== "loading")) {
+      cls = "warn"; label = t("voice_warn");
+      (d.problems || []).forEach((p) => tip.push(ko ? p.message_ko : p.message));
+    }
+    else if (!wakeOk || stt !== "ready") { cls = "loading"; label = t("voice_stt"); }
+    else { cls = "ok"; label = t("voice_ok"); }
+    if (d.mic && d.mic.device) tip.push(`\u{1F399} ${d.mic.device}${d.mic.rate ? ` \u00b7 ${d.mic.rate} Hz` : ""}`);
+    else if (d.mic && d.mic.reason) tip.push(`\u{1F399} ${d.mic.reason}`);
+    if (d.last_heard && d.last_heard.text) tip.push(`\u201c${d.last_heard.text}\u201d`);
+    const ep = d.mic && d.mic.endpoint;
+    if (ep && typeof ep.muted === "boolean" && buttons && buttons.setUserMuted) buttons.setUserMuted(ep.muted);
+  }
+  voiceBadge.className = "badge voice " + cls;
+  voiceBadgeText.textContent = label;
+  voiceBadge.title = tip.join("\n");
+}
+
+const problemToasts = new Map();
+function onVoiceProblem(m) {
+  const p = m.problem || {};
+  const old = problemToasts.get(p.code);
+  if (old) { old.remove(); problemToasts.delete(p.code); }
+  if (m.active) {
+    const ko = getLang() === "ko";
+    problemToasts.set(p.code, toast(t("toast_mic"), ko ? p.message_ko : p.message, p.blocking ? "danger" : "info",
+      p.blocking ? 45000 : 12000, { fix: ko ? p.fix_ko : p.fix, action: p.action, check: true }));
+  }
+  renderVoice();
+}
+
+function onVoiceHint(m) {
+  if (m.code === "near_miss") toast(t("toast_voice"), t("hint_near_miss").replace("{heard}", m.heard || "Jarvis"), "info", 8000);
+  else if (m.code === "stt_loading") toast(t("toast_voice"), t("hint_stt_loading"), "info", 5000);
+  else if (m.code === "unheard" && m.reason !== "mic_problem") {
+    const key = m.reason === "no_speech" ? "hint_unheard_no_speech"
+              : m.reason === "stt_unavailable" ? "hint_stt_unavailable" : "hint_unheard_unclear";
+    toast(t("toast_voice"), t(key) + (m.detail ? ` (${m.detail})` : ""), "info", 4500, { check: m.reason !== "no_speech" });
+  }
+}
+
+let micRaf = 0, micPending = null;
+function onMic(m) {
+  micPending = m;
+  if (micRaf || !micLevel) return;
+  micRaf = requestAnimationFrame(() => {
+    micRaf = 0;
+    const v = micPending || {};
+    micLevel.style.width = Math.round(Math.max(0, Math.min(1, v.level || 0)) * 100) + "%";
+    micLevel.classList.toggle("speech", !!v.speech);
+    micLevel.classList.toggle("silent", !!v.silent);
+  });
+}
+
+function backendSpeaks() {
+  // the backend speaks unless its voice engine is missing or its voice failed to load
+  const d = status.voice_detail;
+  return !!status.voice && !(d && d.tts && d.tts.state === "failed");
+}
+
 function renderStatus() {
   const act = Number(status.neurons_active || 0).toLocaleString();
   const nom = Number(status.neurons_nominal || 2e11).toExponential(1);
@@ -238,18 +328,23 @@ function renderStatus() {
 bus.on("hello", (m) => {
   cfg = m.config || {}; status = m.status || {};
   if (m.self) selfSummary = m.self;
-  backendHasVoice = !!status.voice;
+  backendHasVoice = backendSpeaks();
   setLang((cfg.language && cfg.language.default) || "en");
   buttons.rerenderLabels();
   renderStatus();
+  renderVoice();
   if (announceVisible()) announceText();
 });
 bus.on("_open", () => { connDot.classList.add("ok"); if (announceVisible()) announce(); });
 bus.on("status", (m) => {                    // e.g. the voice engine finished loading
   status = m.status || status;
-  backendHasVoice = !!status.voice;
+  backendHasVoice = backendSpeaks();
   renderStatus();
+  renderVoice();
 });
+bus.on("mic", onMic);
+bus.on("voice_problem", onVoiceProblem);
+bus.on("voice_hint", onVoiceHint);
 bus.on("_close", () => { connDot.classList.remove("ok"); neuralReadout.textContent = "neural mesh · offline"; });
 bus.on("state", (m) => setState(m.state || "idle"));
 bus.on("transcript", (m) => {
@@ -272,7 +367,10 @@ bus.on("control", (m) => {
 bus.on("options", (m) => chat.setOptions(m.options || [], m.suggestions || []));
 bus.on("ui", (m) => handleUi(m.action, m.args || {}));
 bus.on("permission_request", permissionToast);
-bus.on("listen_unavailable", () => chat.browserListen());
+bus.on("listen_unavailable", (m) => {
+  chat.setListening(false);
+  toast(t("toast_voice"), t("listen_unavailable").replace("{reason}", m.reason || m.state || "?"), "danger", 9000);
+});
 bus.on("space3d_project", (m) => { if (m.project && space3d) space3d.load(m.project); });
 bus.on("neural_points", (m) => { if (space3d && neuralTimer) space3d.showNeural(m); });
 bus.on("error", (m) => toast("JARVIS", m.message || "error", "danger"));
@@ -304,6 +402,10 @@ function main() {
     wake: () => { bus.wake(); buttons.reactor.classList.add("awake"); },
   });
   settings = initSettings({ makeInteractive });
+  if (voiceBadge) voiceBadge.addEventListener("click", () => {
+    chat.show();
+    bus.command(getLang() === "ko" ? "마이크 확인해 줘" : "check the microphone", "text");
+  });
   setLang("en");
   applyI18n(document);
   setState("idle");

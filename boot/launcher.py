@@ -61,6 +61,12 @@ T_CONNECT = 45           # ... for the HUD to connect to the brain once both are
 def say(text: str = "") -> None:
     try:
         print(text, flush=True)
+    except UnicodeEncodeError:       # e.g. a device name the console's code page cannot show
+        try:
+            enc = getattr(sys.stdout, "encoding", None) or "ascii"
+            print(text.encode(enc, "replace").decode(enc, "replace"), flush=True)
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -582,12 +588,10 @@ def report_success(status: dict, already: bool) -> int:
         notes.append(f"Replies are slow on this PC: the language model runs {where} at about {tps:.0f} "
                      "tokens a second. Run INSTALL_JARVIS.bat once more - it now picks a model sized "
                      "for this PC so replies come quickly.")
-    vs = status.get("voice_state")
-    if vs == "loading":
-        notes.append("The voice is still loading; the wake phrase will work in a moment.")
-    elif vs in ("unavailable", "failed"):
-        notes.append("Voice is not available (speech packages or a microphone are missing); typing works. "
-                     "INSTALL_JARVIS.bat repairs the speech packages.")
+    say()
+    for kind, line in voice_lines(wait_for_voice(status)):
+        for i, ln in enumerate(wrap(line, indent="           ", width=66)):
+            {"ok": ok, "bad": bad}.get(kind, note)(ln.strip()) if i == 0 else say(ln)
     if autostart_registered() is False:
         notes.append("JARVIS is not set to start at sign-in yet; run INSTALL_JARVIS.bat once to enable that.")
     notes += path_notes()
@@ -600,6 +604,71 @@ def report_success(status: dict, already: bool) -> int:
     return EXIT_OK
 
 
+# ------------------------------------------------------------------ voice (v1.4.2)
+def wait_for_voice(status: dict, timeout: float = 15.0) -> dict:
+    """The voice reports on its microphone a few seconds after the brain starts: wait for
+    that (not for the speech models, which can take minutes on a first run), including the
+    3-second check that tells a muted or privacy-blocked microphone from a quiet room."""
+    t0, opened_at = time.time(), None
+    while time.time() - t0 < timeout:
+        vs = status.get("voice_state")
+        if vs in ("off", "unavailable", "failed"):
+            return status
+        d = status.get("voice_detail") or {}
+        mic = d.get("mic") or {}
+        if vs == "online":
+            if any(p.get("blocking") for p in d.get("problems") or []):
+                return status
+            if mic.get("open"):
+                opened_at = opened_at or time.time()
+                flowing = (mic.get("silent_seconds") or 0) == 0 and (mic.get("level_db") or -100) > -99
+                if (flowing and time.time() - opened_at > 1.0) or time.time() - opened_at > 6.0:
+                    return status
+            elif mic.get("reason"):
+                return status
+        time.sleep(0.5)
+        st, body = common.backend_status()
+        if st == "ok" and body:
+            status = body
+    return status
+
+
+def voice_lines(status: dict) -> List[Tuple[str, str]]:
+    """[(ok|note|bad, text)] about the voice: what works, and what to do about what doesn't."""
+    vs = status.get("voice_state")
+    out: List[Tuple[str, str]] = []
+    if vs == "off":
+        return [("note", "Voice is turned off (JARVIS Settings > Voice enabled); typing works.")]
+    if vs in ("unavailable", "failed"):
+        return [("bad", f"Voice is not available: {status.get('voice_error') or vs}. Typing works; "
+                        "INSTALL_JARVIS.bat repairs the speech packages.")]
+    d = status.get("voice_detail") or {}
+    if vs != "online" or not d:
+        return [("note", "The voice is still starting; the wake phrase will work in a moment.")]
+    problems = d.get("problems") or []
+    blocking = [p for p in problems if p.get("blocking")]
+    mic = d.get("mic") or {}
+    for p in blocking:
+        out.append(("bad", f"{p.get('message')} {p.get('fix')}"))
+    if mic.get("open") and not blocking:
+        out.append(("ok", f"Microphone: {mic.get('device')} - listening."))
+    wake = d.get("wake") or {}
+    if wake.get("ready"):
+        out.append(("ok", 'Wake phrase ready: say "wake up Jarvis" (or "Jarvis, wake up").'))
+    elif (wake.get("error") or "loading") != "loading":
+        out.append(("note", f"The wake-word listener is unavailable ({wake.get('error')}); JARVIS is fetching its "
+                            "model by itself. Meanwhile use WAKE or Ctrl+Alt+J."))
+    stt = d.get("stt") or {}
+    if stt.get("state") in ("loading", "downloading", "idle", None):
+        out.append(("note", "Speech recognition is loading" + (" (downloading its model - first run only)"
+                    if stt.get("state") == "downloading" else "") + "; spoken commands work once it is ready."))
+    elif stt.get("state") == "failed":
+        out.append(("bad", f"Speech recognition failed to load: {stt.get('error')}"))
+    if blocking or stt.get("state") == "failed":
+        out.append(("note", "For a guided check run TEST_MICROPHONE.bat, or type 'check the microphone' in the HUD."))
+    return out
+
+
 # ------------------------------------------------------------------ commands
 def cmd_status() -> int:
     st = inspect()
@@ -607,6 +676,10 @@ def cmd_status() -> int:
     say(f"  HUD window         : {'on screen' if st['overlay'] else 'not on screen'}")
     say(f"  brain              : {st['backend']}")
     say(f"  HUD <-> brain      : {'connected' if st['connected'] else 'not connected'}")
+    s, body = common.backend_status()
+    if s == "ok" and body:
+        for kind, line in voice_lines(body):
+            say(f"  voice              : [{kind}] {line}")
     for p in common.find_jarvis_processes():
         if p.get("main", True):
             say(f"  process            : {p['kind']} (pid {p['pid']}) {p.get('root') or ''}")

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, NamedTuple
 
-from . import files, apps, system, browser, media, music, devices, windows, selfcore
+from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck
 
 
 class Skill(NamedTuple):
@@ -78,6 +78,8 @@ REGISTRY: Dict[str, Skill] = {
     # ---- system ----
     "mute_mic":       Skill(_call(system.mute_mic), "control_apps", "chat"),
     "unmute_mic":     Skill(_call(system.unmute_mic), "control_apps", "chat"),
+    "voice_status":   Skill(_call(voicecheck.check), "read_system_info", "chat"),
+    "mic_settings":   Skill(_call(system.open_mic_settings), "read_system_info", "settings"),
     "set_volume":     Skill(_call(system.set_volume), "media_control", "chat"),
     "system_info":    Skill(_call(system.system_info), "read_system_info", "system_info"),
     "settings":       Skill(_call(system.open_settings), "change_system_settings", "settings"),

@@ -681,7 +681,7 @@ def test_server_warms_the_model_and_reports_it():
                 time.sleep(0.2)
             assert status.get("llm_state") == "ready", status
             assert status["llm_tokens_per_s"] == 40.0 and status["llm_gpu"] == 0.75, status
-            assert status["version"] == "1.4.1"
+            assert status["version"] == "1.4.2"
             warm = [b for p, b in fake.requests if p == "/api/chat" and not b.get("stream")]
             assert warm and warm[0]["messages"][0]["content"] == srv.orch.system_prompt("en"), \
                 "the system prompt JARVIS actually uses is the one read into the cache"

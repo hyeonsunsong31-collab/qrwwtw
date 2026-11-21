@@ -32,6 +32,29 @@ def system_info(**_) -> dict:
     return ok(speak, data)
 
 
+class _com:
+    """COM must be initialised on every thread that uses it; skills run on worker threads."""
+
+    def __enter__(self):
+        self.on = False
+        try:
+            import comtypes  # type: ignore
+            comtypes.CoInitialize()
+            self.on = True
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        if self.on:
+            try:
+                import comtypes  # type: ignore
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+        return False
+
+
 def _endpoint_volume(device):
     """IAudioEndpointVolume for a pycaw device, across pycaw versions: newer releases wrap
     the device and expose `.EndpointVolume`; older ones return the raw IMMDevice."""
@@ -54,7 +77,8 @@ def set_volume(level=None, **_) -> dict:
         return ok(f"(Dev) Volume would be set to {lvl} percent, sir.", {"level": lvl})
     try:
         from pycaw.pycaw import AudioUtilities  # type: ignore
-        _endpoint_volume(AudioUtilities.GetSpeakers()).SetMasterVolumeLevelScalar(lvl / 100.0, None)
+        with _com():
+            _endpoint_volume(AudioUtilities.GetSpeakers()).SetMasterVolumeLevelScalar(lvl / 100.0, None)
         return ok(f"Volume set to {lvl} percent, sir.", {"level": lvl})
     except Exception as e:
         return fail("I couldn't adjust the volume, sir.", str(e))
@@ -66,7 +90,8 @@ def _set_mic_mute(mute: bool) -> dict:
                   {"muted": mute})
     try:
         from pycaw.pycaw import AudioUtilities  # type: ignore
-        _endpoint_volume(AudioUtilities.GetMicrophone()).SetMute(1 if mute else 0, None)
+        with _com():
+            _endpoint_volume(AudioUtilities.GetMicrophone()).SetMute(1 if mute else 0, None)
         return ok(f"Microphone {'muted' if mute else 'unmuted'}, sir.", {"muted": mute})
     except Exception as e:
         return fail("I couldn't change the microphone, sir.", str(e))
@@ -107,6 +132,19 @@ def power(action: str = "sleep", **_) -> dict:
         return ok(f"Very good, sir — {action} initiated.", {"action": action})
     except Exception as e:
         return fail(f"I couldn't {action} the PC, sir.", str(e))
+
+
+def open_mic_settings(**_) -> dict:
+    """Windows' microphone privacy page: where 'Let desktop apps access your microphone' is."""
+    if not IS_WINDOWS:
+        return ok("(Dev) Would open the microphone privacy settings, sir.", {"page": "privacy-microphone"})
+    try:
+        import os
+        os.startfile("ms-settings:privacy-microphone")  # type: ignore[attr-defined]
+        return ok("Opening the microphone privacy settings, sir. Turn on 'Microphone access' and "
+                  "'Let desktop apps access your microphone'.", {"page": "privacy-microphone"})
+    except Exception as e:
+        return fail("I couldn't open the microphone settings, sir.", str(e))
 
 
 def open_settings(page: str = "", **_) -> dict:

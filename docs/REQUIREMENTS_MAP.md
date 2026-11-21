@@ -1,4 +1,4 @@
-# 요구사항 → 구현 매핑 (v1.4.1)
+# 요구사항 → 구현 매핑 (v1.4.2)
 
 사용자가 제시한 21개 요구사항 + 추가 2개를 어디서/어떻게 구현했는지, 그리고 **어떻게 검증했는지**를 기록합니다.
 
@@ -32,13 +32,13 @@
 | 6 | AI·사용자 양쪽 마이크 음소거 | `buttons.js`, `voice/engine.py` `set_listening` | 사용자=시스템 마이크, JARVIS=마이크 스트림을 실제로 닫음. | ✅ ⚙️ |
 | 6 | 3D 호출 버튼 / 전 기능 버튼 | `buttons.js` `FEATURES`(24종), `#feature-dock` | 3D 공간이 열리면 표시. | 🌐 |
 | 6 | 추가 디자인 구성 | 상태 링·앰비언스·권한 홀로그램·설정 패널 | | 🌐 |
-| 7 | 음성 웨이크 "wake up Jarvis" | `voice/wakeword.py`, `voice/engine.py` | Vosk 문법 모드로 정확한 구문(기본) / openWakeWord(onnx). | ✅(로직) ⚙️(마이크) |
+| 7 | 음성 웨이크 "wake up Jarvis" | `voice/wakeword.py`, `voice/engine.py`, `voice/mic.py` | Vosk 문법 모드로 정확한 구문(기본) + 근접·짧은 문구는 Whisper가 확인(억양·한국어 "자비스, 일어나") / openWakeWord(onnx). 마이크는 장치·형식 자동 선택, 무음·개인 정보 차단·음소거를 감지해 원인과 해결책을 안내(v1.4.2). 실제 모델 + 48kHz 스테레오 가상 마이크로 원어민·억양·소음·스피커 잔향·무음 장면 검증. | ✅(로직·실모델) ⚙️(실제 마이크) |
 | 8 | 웨이크 반응 "Jarvis at your service sir" | `agent/orchestrator.py` `handle_wake`, `voice/tts.py` | 말한 직후 바로 명령을 듣기 시작. | ✅ 🌐 ⚙️(스피커) |
 | 9 | 비상 웨이크 버튼 영구 표시 | `#reactor`, `overlay/main.js` | 항상-위 오버레이(작업 영역 안, 작업 표시줄 바로 위) + `Ctrl+Alt+J` + 트레이. 누르면 응답 후 바로 듣기. 시작 시 배너와 함께 강조. | 🌐 ⚙️ |
 | 10 | 웨이크 시 어디서든 버튼 오버레이 | `overlay/main.js` | `screen-saver` 레벨 항상-위, 모든 워크스페이스, 클릭 통과. | ⚙️ |
 | 11 | 자연스러운 대화 | `agent/prompts/*`, `agent/llm_ollama.py`, `agent/orchestrator.py` | 영국 집사 페르소나 + 로컬 LLM + 스트리밍(첫 문장부터 발화) + 제어신호. | ✅(스트리밍) ⚙️(LLM 품질) |
 | 11+ | **빠른 응답**(v1.4) | `core/brain_mesh.py` `build_mesh`, `agent/llm_ollama.py`, `agent/orchestrator.py`, `voice/*`, `docs/TROUBLESHOOTING.md` | 신경 메시를 명령당 시간 예산으로 크기 결정(명령→첫 음성 4.8s→0.07s, LLM 제외 실측), 모델 상시 적재·예열·재적재, 턴마다 그대로인 프롬프트(캐시 재사용), PC에 맞는 모델, 첫 구절 발화, 음성 합성 파이프라인·문구 캐시, Whisper 빠른 설정·예열, 느린 작업 즉시 응답. | ✅ ⚙️(실제 Ollama 속도) |
-| 12 | 높은 입력 인지 정확도 | `voice/stt.py`, `voice/engine.py` | GPU면 large-v3-turbo, CPU면 small, "Jarvis" 핫워드, VAD 종료 감지. | ⚙️ |
+| 12 | 높은 입력 인지 정확도 | `voice/stt.py`, `voice/engine.py` | GPU면 large-v3-turbo(시험 후), CPU면 small, "Jarvis" 핫워드, 영어·한국어로 언어 제한, 환청 제거, 지속성 있는 발화 시작 판정·잔향 무시·소음 기준 VAD 종료(v1.4.2). | ✅(실모델) ⚙️ |
 | 13 | 음성 중단 + 새 입력 | `voice/engine.py`, `voice/wakeword.py` `heard_keyword`, `agent/server.py` `interrupt` | 키워드 바지인(에코 무시) / VAD / 끄기. 새 명령은 진행 중 답변 취소. | ✅(상태기계) ⚙️(오디오) |
 | 14 | 기능 명령 유연성 | `agent/nlu.py`, LLM `<action>` 태그 | 한/영 자유 표현 + LLM 도구 호출 폴백. | ✅ |
 | 15 | 모든 기능 음성·텍스트 양쪽 | `agent/server.py` 단일 커맨드 버스 | 음성·채팅·버튼이 같은 명령 경로(버튼도 같은 명령을 보냄). | ✅ 🌐 |

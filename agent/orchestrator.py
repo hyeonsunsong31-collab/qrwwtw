@@ -125,6 +125,7 @@ class Orchestrator:
         self.emit = emit or (lambda ev: asyncio.sleep(0))
         self.history: List[dict] = []
         self.default_lang = config.get("language", {}).get("default", "en")
+        self.last_lang = None             # the language of the latest command (spoken notices follow it)
         self.awake = True
         self._last_denied = False
         # exactly what the language model was sent and produced, turn by turn (see SPEED)
@@ -228,6 +229,7 @@ class Orchestrator:
         lang = detect_language(text)
         if self.config.get("language", {}).get("auto_switch", True) is False:
             lang = self.default_lang
+        self.last_lang = lang
 
         cid = self.recorder.log_command(text, source=source, lang=lang)
         self.recorder.log_conversation("user", text, lang=lang)
@@ -467,6 +469,10 @@ _FOLLOWUPS = {
                        ["I can alert you if CPU or memory runs high, sir."],
                        ["실시간 보기", "메모리 정리", "배터리 확인"],
                        ["CPU나 메모리가 높아지면 알려드릴 수 있습니다, sir."]),
+    "voice_status": _fu(["open microphone privacy settings", "unmute the microphone", "open your settings"],
+                        ["My Settings panel lets you choose the microphone, sir."],
+                        ["마이크 개인 정보 설정 열어 줘", "마이크 켜 줘", "자비스 설정 열어 줘"],
+                        ["제 설정 패널에서 사용할 마이크를 고르실 수 있습니다, sir."]),
     "_default": _fu(["Anything else, sir?", "Repeat that", "Adjust my settings"],
                     ["You can say 'wake up Jarvis' any time, sir."],
                     ["더 필요하신 것이 있나요, sir?", "다시 말하기", "설정 변경"],

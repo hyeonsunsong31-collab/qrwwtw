@@ -34,6 +34,8 @@
         <span id="conn-dot" class="dot" title="connection"></span>
         <span id="neural-readout" class="neural">neural mesh · —</span>
         <span id="disposition" class="badge disposition hidden" title=""></span>
+        <button id="voice-badge" class="badge voice loading" type="button" title="voice"
+                data-i18n-title="voice_check_tip">🎙 <span id="voice-badge-text">…</span></button>
         <span id="lang-badge" class="badge">EN</span>
       </div>
     </header>
@@ -76,7 +78,8 @@
       <button id="mute-user" class="holo-btn" title="mute your microphone">
         <span class="ic">🎤</span><span class="lbl" data-i18n="mic_user">You</span></button>
       <button id="mute-ai" class="holo-btn" title="mute JARVIS listening">
-        <span class="ic">👂</span><span class="lbl" data-i18n="mic_ai">JARVIS</span></button>
+        <span class="ic">👂</span><span class="lbl" data-i18n="mic_ai">JARVIS</span>
+        <span class="lvl" aria-hidden="true"><i id="mic-level"></i></span></button>
     </div>
 
     <!-- Feature dock: a button for EVERY capability (requirement 6; shown in 3D mode or when expanded) -->

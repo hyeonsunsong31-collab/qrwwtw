@@ -57,6 +57,7 @@ v1.3부터 `START_JARVIS.bat`은 **시작을 요청만 하지 않고, 실제로 
 | `..\install.log` | 설치 기록 |
 | `..\supervisor.json`, `..\overlay.json` | 현재 상태(START가 확인하는 파일) |
 | `..\runtime.json` | 두뇌가 실제로 쓰는 포트, 프로세스, 시작 단계와 단계별 시간 |
+| `mic_check.txt` | `TEST_MICROPHONE.bat`의 마지막 마이크 점검 보고서 |
 
 ## 그 밖의 명령
 ```
@@ -65,8 +66,34 @@ START_JARVIS.bat --restart          전부 멈추고 새로 시작
 START_JARVIS.bat --status           상태만 확인
 START_JARVIS.bat --normal-graphics  소프트웨어 렌더링 해제
 STOP_JARVIS.bat                     지금 종료(로그온 자동 시작은 유지)
+TEST_MICROPHONE.bat                 안내형 마이크 점검(목록·Windows 설정·녹음·웨이크 인식)
 UNINSTALL_JARVIS.bat                자동 시작 제거 + 종료
 ```
+
+## 음성 웨이크·음성 명령이 안 될 때 (v1.4.2)
+v1.4.2부터 JARVIS는 **왜 안 들리는지 스스로 말합니다**: START 창의 `Microphone` / `Wake phrase` 줄, HUD 위쪽의 🎙 배지
+(빨간색 = 문제, 누르면 점검), 화면 알림(**설정 열기** 버튼), 그리고 음성 안내. 가장 빠른 확인 방법은 다음 둘입니다.
+
+- HUD 채팅창에 **`check the microphone`** (또는 **`마이크 확인해 줘`**)라고 입력 — 열린 마이크, 소리 크기, Windows 개인 정보 설정,
+  음소거, 웨이크 인식기·Whisper 상태, 마지막으로 들은 말과 해결 방법을 알려 줍니다.
+- **`TEST_MICROPHONE.bat`** 더블클릭 — 마이크 목록과 Windows 설정을 보여 주고, "wake up Jarvis"라고 말하는 동안 녹음해 레벨과 인식
+  결과로 무엇을 고칠지 알려 줍니다(JARVIS가 실행 중이어도 됨). 보고서: `data\logs\mic_check.txt`.
+
+| 알림 / START 창 | 뜻 | 할 일 |
+|---|---|---|
+| `Windows is blocking desktop apps from using the microphone` | Windows 개인 정보 설정에서 데스크톱 앱의 마이크가 꺼져 있음(소리 대신 무음이 들어옴) | 설정 > 개인 정보 및 보안 > 마이크 → **마이크 액세스**와 **데스크톱 앱이 마이크에 액세스하도록 허용** 켜기. 알림의 **설정 열기** 버튼이나 `open microphone privacy settings`로 바로 열 수 있음. 켜는 즉시 다시 듣습니다 |
+| `Your microphone is muted in Windows` | 기본 녹음 장치가 음소거됨(HUD의 **You** 버튼도 음소거 표시) | `unmute the microphone` 입력, **You** 버튼, 또는 설정 > 시스템 > 소리 > 입력 |
+| `Your microphone sends nothing but silence` | 장치가 꺼져 있거나 다른(빈) 장치가 기본 입력으로 선택됨 | 설정 > 시스템 > 소리 > 입력에서 올바른 마이크·입력 볼륨 확인, 또는 JARVIS 설정 > **Microphone**에서 직접 선택 |
+| `I can't find a microphone` | Windows에 녹음 장치가 없음 | 마이크 연결 / 장치 관리자에서 사용 설정. 꽂으면 JARVIS가 스스로 찾습니다 |
+| `I can't open the microphone` | 다른 프로그램이 독점 중이거나 장치 오류 | 그 프로그램을 닫거나 JARVIS 설정 > Microphone에서 다른 장치 선택 |
+| `My wake-word listener isn't available` | Vosk 웨이크 모델이 없음 | JARVIS가 스스로 내려받습니다(인터넷 필요). 그동안 WAKE 버튼·Ctrl+Alt+J |
+| `Speech recognition is loading (downloading its model)` | 첫 실행에서 Whisper 모델을 받는 중 | 기다리면 됩니다. 그동안 말한 명령은 준비되면 처리 |
+| `My speech recognition isn't working` | Whisper를 불러올 수 없음(이유 표시: 인터넷, Visual C++ 런타임, 메모리) | 표시된 대로 조치 후 `INSTALL_JARVIS.bat` |
+| HUD 알림 `I heard "…Jarvis"` | 이름만 알아들음(억양·발음) | "**wake up Jarvis**" 전체를 말하거나 "**Jarvis**"를 두 번. 이름만으로 깨우려면 설정 > **Wake on 'Jarvis' alone** |
+| `I didn't hear anything` / `I didn't catch that` | 말이 너무 작거나 짧음 | 마이크 가까이에서, 조금 크게. 🎙 배지의 레벨 막대(JARVIS 버튼 아래)가 말할 때 움직이는지 확인 |
+
+깨어나긴 하는데 말을 끝까지 듣기 전에 끊으면 설정 > **Pause that ends a spoken command**를 늘리세요(기본 600ms).
+자세한 동작 원리는 `docs/WAKE_WORD.md`.
 
 ## 두뇌가 늦게 뜨거나 "still waiting for the brain"이 계속될 때 (v1.4.1)
 

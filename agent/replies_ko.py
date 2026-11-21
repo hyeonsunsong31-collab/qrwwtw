@@ -24,6 +24,8 @@ def _sysinfo(r: dict) -> str:
 Reply = Union[str, Callable[[dict], str]]
 
 OK: Dict[str, Reply] = {
+    "voice_status": lambda r: _d(r, "speak_ko", "음성 상태를 확인했습니다, sir."),
+    "mic_settings": "마이크 개인 정보 설정을 엽니다, sir. '마이크 액세스'와 '데스크톱 앱이 마이크에 액세스하도록 허용'을 켜 주세요.",
     "open_space3d": "3D 프로젝트 공간을 띄우겠습니다, sir.",
     "close_space3d": "3D 공간을 닫겠습니다, sir.",
     "clone_object": "선택한 오브젝트를 복제하겠습니다, sir.",

@@ -45,6 +45,7 @@
 | `STOP_JARVIS.bat` | 지금 끕니다(로그온 자동 시작은 유지). 트레이 아이콘 → **Quit JARVIS**와 같습니다. |
 | `START_JARVIS_SAFE_GRAPHICS.bat` | HUD가 검게 나오거나 안 보일 때: 소프트웨어 렌더링으로 시작합니다. |
 | `UNINSTALL_JARVIS.bat` | 자동 시작 제거 + 종료 (폴더·기록은 유지) |
+| `TEST_MICROPHONE.bat` | 음성이 안 될 때: 마이크 목록·Windows 개인 정보/음소거 설정·실제 녹음과 "wake up Jarvis" 인식 결과로 무엇을 고칠지 알려 줍니다. |
 
 **이전 버전에서 올린다면:** 새 ZIP을 기존 폴더 위에 풀고 **`INSTALL_JARVIS.bat`을 한 번** 실행하세요. 끝난 단계는 건너뛰고,
 이 PC에서 빠르게 도는 언어 모델을 골라 줍니다(v1.4의 응답 속도 개선 — 아래 "⚡ 응답 속도").
@@ -60,9 +61,13 @@ Windows 10(1809+)/11, 마이크·스피커(헤드셋이면 더 좋음)·웹캠(�
 
 ## 🗣 사용법
 
-- **깨우기:** "**wake up Jarvis**" (정확한 구문 인식) / 항상 떠 있는 **WAKE 버튼** / `Ctrl+Alt+J`
-  → "**Jarvis at your service sir**" 응답 후 **바로 명령을 듣습니다.**
+- **깨우기:** "**wake up Jarvis**" (또는 "Jarvis, wake up" · "자비스, 일어나") / 항상 떠 있는 **WAKE 버튼** / `Ctrl+Alt+J`
+  → "**Jarvis at your service sir**" 응답 후 **바로 명령을 듣습니다.** 억양이 있어도 Whisper가 한 번 더 확인해 깨어나고,
+  "Jarvis"만 들리면 힌트를 보여 줍니다("Jarvis"를 두 번 불러도 깨어남).
 - **말로 명령 (마이크 버튼):** 채팅창의 🎙 버튼 = 누르고 말하기(Whisper 음성 인식).
+- **음성이 안 될 때:** HUD 위쪽 🎙 배지가 빨간색이면 눌러 보세요. **`check the microphone`** / **`마이크 확인해 줘`**라고 입력하면
+  원인(Windows 마이크 개인 정보 설정, 음소거, 장치 없음 등)과 해결 방법을 알려 주고, JARVIS 버튼 아래 막대로 마이크 소리 크기가 보입니다.
+  설정 패널의 **Microphone**에서 쓸 마이크를 고를 수 있습니다. → **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** "음성 웨이크·음성 명령이 안 될 때"
 - **명령은 음성·텍스트·버튼 모두 같은 길로 처리**됩니다. 예:
   - "open the 3D project space" / "3D 공간 열어줘"
   - "add a cube" · "clone the object" · "delete the object" · "save the project" · "export the model"
@@ -112,16 +117,18 @@ core/      새 시냅스-퍼셉트론 + 뇌 기반 3D 신경망 + 출력 제어 
            + 자기 코어(self_model.py: 고정 지침 + 스스로 배우는 자기 모델) (+ demo.py)
 agent/     토큰 인증 명령 버스 서버 · 오케스트레이터(스트리밍) · NLU · 권한 · 설정 · 한국어 응답 · 스킬
            skills/ 파일 · 앱(시작 메뉴/UWP 검색) · 창/키보드/스크린샷 · 시스템 · 브라우저 · 미디어 · 음악 · 장치
-voice/     웨이크(Vosk 정확 구문 / openWakeWord) · Whisper STT · 영국 TTS(Piper/Windows 음성) · 바지인 · 엔진
+voice/     웨이크(Vosk 정확 구문 + Whisper 확인 / openWakeWord) · 마이크(mic.py: 장치·형식 자동, 무음·차단 감지) ·
+           Whisper STT · 영국 TTS(Piper/Windows 음성) · 바지인 · 엔진 · 모델 자가 복구(models.py)
 recorder/  모든 기록(작업/명령/생성 파일/대화/설명/옵션/추천/체크포인트/감사)
 overlay/   Electron 홀로그램 HUD · Three.js 3D 공간 · MediaPipe 손동작 · 배경화면 창 · 설정 패널 · native/workerw.ps1
 boot/      자동시작 등록 · 자가복구 슈퍼바이저(jarvis_service.py) · 시작 확인 런처(launcher.py) ·
            화면 표시부 런타임 설치(overlay_runtime.py) · 공용 도구(common.py)
-scripts/   setup_windows.ps1(설치) · healthcheck.py · mock_run.py · set_config.py
+scripts/   setup_windows.ps1(설치) · healthcheck.py · mic_check.py(TEST_MICROPHONE) · mock_run.py · set_config.py
 tests/     단위 · 음성 엔진 · 실서버 E2E · 시작 체인(test_boot) · 자기 코어(test_self_model) · 응답 속도(test_speed) ·
            두뇌 시작(test_startup) 테스트
 docs/      ARCHITECTURE · REQUIREMENTS_MAP · SECURITY · WAKE_WORD · DRIVE · SELF_MODEL · TROUBLESHOOTING
-INSTALL_JARVIS.bat · START_JARVIS.bat · STOP_JARVIS.bat · START_JARVIS_SAFE_GRAPHICS.bat · UNINSTALL_JARVIS.bat
+INSTALL_JARVIS.bat · START_JARVIS.bat · STOP_JARVIS.bat · START_JARVIS_SAFE_GRAPHICS.bat · UNINSTALL_JARVIS.bat ·
+TEST_MICROPHONE.bat
 ```
 
 요구사항 21개 + 추가 2개의 구현 위치·상태: **[docs/REQUIREMENTS_MAP.md](docs/REQUIREMENTS_MAP.md)** · 변경 내역: **[CHANGELOG.md](CHANGELOG.md)**
@@ -135,7 +142,9 @@ python scripts/healthcheck.py          # 설정·모듈·코어 경로·선택 �
 python -m core.demo                    # 신경 코어 실제 구동
 python tests/test_core.py              # 코어·NLU·기록 단위 테스트
 python tests/test_phase2.py            # 의도·스트리밍 분할·설정 검증·한국어 응답·보안 도우미
-python tests/test_voice_engine.py      # 음성 상태기계(가짜 오디오 장치): 웨이크→응답→듣기, 바지인, 음소거
+python tests/test_voice_engine.py      # 음성 상태기계(가짜 오디오 장치): 웨이크→응답→듣기, 바지인, 음소거, 잔향·잡음,
+                                       #   Whisper 웨이크 확인, 무음·개인 정보 차단 감지, 장치 전환, 루프 오류 생존
+python tests/test_voice_parts.py       # 마이크 형식 변환·장치 선택, Whisper 로딩·필터, 웨이크 판정, 모델 복구, 마이크 점검
 python tests/test_server_e2e.py        # 실제 서버 + 토큰 WebSocket (fastapi/uvicorn/httpx/websockets 필요)
 python tests/test_drive.py             # 동기 코어와 안전 불변식
 python tests/test_self_model.py        # 자기 코어: 고정 지침·학습·가르치기·잊기·안전 불변식·오케스트레이터 통합
