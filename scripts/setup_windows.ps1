@@ -367,6 +367,13 @@ if (Test-Path $VPy) {
 Section 8 "Self-test"
 if (Test-Path $VPy) { & $VPy (Join-Path $Root "scripts\healthcheck.py") | Out-Host }
 if (Test-Path $VPy) {
+    # can JARVIS's own Python code reach the language engine? (a system proxy used to break
+    # this while PowerShell's own check passed); TEST_LANGUAGE_ENGINE.bat does the full check
+    Info "  checking the language engine from JARVIS's side ..."
+    & $VPy (Join-Path $Root "scripts\llm_check.py") --quick | Out-Host
+    if ($LASTEXITCODE -ne 0) { Warn "The language engine needs attention (see above). JARVIS keeps repairing it by itself; TEST_LANGUAGE_ENGINE.bat shows the details." }
+}
+if (Test-Path $VPy) {
     # a quick look at the microphone (privacy switch, mute, a 2-second level); TEST_MICROPHONE.bat does the full check
     Info "  checking the microphone ..."
     & $VPy (Join-Path $Root "scripts\mic_check.py") --quick | Out-Host

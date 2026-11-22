@@ -25,13 +25,25 @@ JARVIS는 요구사항 20("PC의 모든 기능과 정보에 전면 접근")을 �
 | screen_capture | allow | 스크린샷(로컬 저장) |
 | write_files · control_apps · change_system_settings · control_devices · browser_form_fill · read_accounts | ask | 실행 전 홀로그램 확인 |
 | keyboard_input | ask | 포커스된 앱에 입력·단축키(무엇이든 할 수 있으므로 확인) |
-| delete_files · run_shell · network_send | ask | 되돌리기 어렵거나 외부 전송 |
-| run_shell_elevated | **deny** | 관리자 셸 — 설정 패널에서도 **잠김** |
+| delete_files · network_send | ask | 되돌리기 어렵거나 외부 전송 |
+| install_software | ask | 소프트웨어 설치(예: "install the language engine" → Ollama, 관리자 권한 불필요) |
+| run_shell | ask | PowerShell 명령(사용자 권한). 설정 패널·"allow shell commands"로 `allow`로 바꿀 수 있음 |
+| run_shell_elevated | **deny** | 관리자 PowerShell. v1.4.3부터 사용자가 `ask`/`allow`로 바꿀 수 있음 — 그래도 **명령마다 Windows UAC 창**이 뜸 |
 
 추가 규칙: `always_ask_keywords`(password, credential, bank, format 등)가 명령에 있으면 `allow` 범주도 강제로 확인합니다.
+
+**셸 명령의 안전장치 (v1.4.3, `agent/skills/shell.py`)** — 어떤 설정으로도 끌 수 없습니다.
+- 데이터나 시스템을 망가뜨릴 수 있는 명령은 `allow`여도 **항상 확인**합니다: 드라이브 포맷·diskpart·재귀 삭제(Remove-Item -Recurse,
+  rm -r, del /s, rd /s)·시스템 폴더 삭제·cipher /w·백업 삭제(vssadmin/wbadmin)·bcdedit·레지스트리 삭제·실행 정책 변경·종료/재시작·
+  소유권/권한 변경·계정 추가/삭제·Defender 끄기·방화벽 끄기·다운로드 후 실행(iwr | iex)·인코딩된 명령·스스로 관리자 권한 요청·
+  소프트웨어 제거·네트워크 끊기·예약 작업 변경. 확인 창에는 명령 원문과 이유가 그대로 보입니다.
+- 모든 명령과 **전체 출력**이 감사 로그와 `data/results`에 남고, 60초(최대 600초) 뒤에는 중단됩니다.
+- 언어 모델도 `<action name="run_shell">`으로 명령을 요청할 수 있지만(같은 권한 규칙 적용), **권한을 바꾸는 동작
+  (`shell_permission`)은 모델이 요청해도 실행하지 않습니다** — 사용자가 직접 말하거나 입력하고 확인 창에서 허용해야 합니다.
+- 관리자 명령은 별도의 관리자 PowerShell에서 실행되며, Windows 보안 데스크톱의 UAC 확인을 사용자가 직접 눌러야 합니다.
 확인은 홀로그램 대화상자(허용/거부)로 하고, 90초 내 응답이 없으면 거부합니다. 위험도는 신경 제어 계층의 주의(caution)
 신호에도 반영되어 답변이 더 신중해집니다. 설정 패널의 변경은 키·값을 서버가 검증한 뒤 원자적으로 저장하며, LLM이 권한을
-바꾸는 도구는 없습니다.
+바꾸는 도구는 없습니다(셸 권한을 바꾸는 "allow shell commands"도 사용자가 직접 한 말에만 반응합니다).
 
 ## 3. 감사 로그 · 기록
 모든 권한 판단(allow/ask/granted/denied/deny), 거부된 접속, 설정 변경이 `data/audit/audit.log`에 남습니다. 작업·명령·생성

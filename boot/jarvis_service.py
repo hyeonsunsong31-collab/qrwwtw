@@ -12,7 +12,8 @@ Keeps JARVIS alive in the background the whole time the PC is on, and heals itse
   * restarts either one if it exits (capped backoff) and the backend if it stops answering,
   * repairs a missing overlay runtime by itself (boot/overlay_runtime.py),
   * keeps data/supervisor.json up to date for START_JARVIS.bat's verification,
-  * makes sure Ollama is running, updates yt-dlp weekly, shows a tray icon with Quit.
+  * updates yt-dlp weekly, shows a tray icon with Quit. (Since v1.4.3 the brain itself keeps
+    Ollama running -- agent/ollama_service.py -- so it can also repair it and say what is wrong.)
 
 The logon task created by register_autostart.ps1 runs this with pythonw.exe, which has no
 console and no stdout/stderr at all -- nothing here may depend on them.
@@ -42,7 +43,6 @@ def _fatal(text: str) -> None:
 
 try:
     import json
-    import shutil
     import signal
     import subprocess
     import threading
@@ -55,7 +55,6 @@ except Exception:                                   # a broken or half-extracted
     raise
 
 IS_WIN = common.IS_WIN
-OLLAMA_URL = "http://127.0.0.1:11434/api/tags"
 CRASHLOOP_AFTER = 3              # this many starts in a row that never got ready = something is broken
 HUNG_AFTER_CHECKS = 4            # a backend that WAS answering and then misses this many checks is hung
 SLOW_START_NOTE_SECONDS = 60     # log what a still-starting backend is doing this often
@@ -78,15 +77,6 @@ def log(msg: str) -> None:
             print(line, flush=True)
         except Exception:
             pass
-
-
-def find_ollama() -> Optional[str]:
-    p = shutil.which("ollama")
-    if p:
-        return p
-    local = os.environ.get("LOCALAPPDATA", "")
-    cand = os.path.join(local, "Programs", "Ollama", "ollama.exe") if local else ""
-    return cand if cand and os.path.exists(cand) else None
 
 
 def backend_command() -> Optional[List[str]]:
@@ -143,7 +133,6 @@ class Supervisor:
         self._status_cache = ""
         self._last_status = 0.0
         self._health_fail = 0
-        self._last_ollama_try = 0.0
         self._repairing = False
         self._last_repair = 0.0
 
@@ -334,24 +323,6 @@ class Supervisor:
             log("the backend stopped answering /health; restarting it")
             self._kill(child)
 
-    def _ensure_ollama(self) -> None:
-        if time.time() - self._last_ollama_try < 300:
-            return
-        status, _ = common.http_json(OLLAMA_URL, timeout=2.5)
-        if status == 200:
-            return
-        self._last_ollama_try = time.time()
-        exe = find_ollama()
-        if not exe:
-            log("Ollama not found; JARVIS will use its offline fallback until it is installed")
-            return
-        try:
-            subprocess.Popen([exe, "serve"], creationflags=common.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log("started the Ollama service")
-        except Exception as e:
-            log(f"could not start Ollama: {e!r}")
-
     # ----------------------------------------------------------------- loop #
     def step(self) -> bool:
         """One pass over the children. Returns False when JARVIS should shut down."""
@@ -376,8 +347,6 @@ class Supervisor:
                     break
                 if tick % 20 == 0:
                     self._check_backend_health()
-                if tick % 60 == 0:
-                    self._ensure_ollama()
                 self.write_status()
             except Exception:
                 log("supervisor loop error:\n" + traceback.format_exc())

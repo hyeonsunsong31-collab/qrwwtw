@@ -7,15 +7,22 @@ UI intents return data["ui"], which the orchestrator forwards to the overlay.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, NamedTuple
+from typing import Callable, Dict, NamedTuple, Optional
 
-from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck
+from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck, llmcheck, shell
 
 
 class Skill(NamedTuple):
     handler: Callable[..., dict]
     category: str      # maps to config/permissions.json
     eta: str           # maps to recorder ETA keys
+    # (args, user text) -> {"detail", "force_ask", "risk", "keywords"}: what the permission
+    # prompt shows and whether it must ask whatever the category says (shell commands)
+    preflight: Optional[Callable[[dict, str], dict]] = None
+
+
+# never callable by the language model through <action> tags: only the user changes permissions
+LLM_FORBIDDEN = {"shell_permission"}
 
 
 def _call(fn):
@@ -79,6 +86,14 @@ REGISTRY: Dict[str, Skill] = {
     "mute_mic":       Skill(_call(system.mute_mic), "control_apps", "chat"),
     "unmute_mic":     Skill(_call(system.unmute_mic), "control_apps", "chat"),
     "voice_status":   Skill(_call(voicecheck.check), "read_system_info", "chat"),
+    "llm_status":     Skill(_call(llmcheck.check), "read_system_info", "chat"),
+    "llm_install":    Skill(_call(llmcheck.install), "install_software", "settings"),
+
+    # ---- shell (v1.4.3): gated by run_shell / run_shell_elevated, dangerous commands always ask ----
+    "run_shell":      Skill(_call(shell.run_shell), "run_shell", "chat", shell.preflight),
+    "run_shell_elevated": Skill(_call(shell.run_shell_elevated), "run_shell_elevated", "chat",
+                                lambda args, text: shell.preflight(dict(args or {}, _elevated=True), text)),
+    "shell_permission": Skill(_call(shell.set_permission), "change_system_settings", "settings"),
     "mic_settings":   Skill(_call(system.open_mic_settings), "read_system_info", "settings"),
     "set_volume":     Skill(_call(system.set_volume), "media_control", "chat"),
     "system_info":    Skill(_call(system.system_info), "read_system_info", "system_info"),
@@ -110,4 +125,4 @@ def warm_up() -> None:
             pass
 
 
-__all__ = ["REGISTRY", "Skill", "warm_up"]
+__all__ = ["REGISTRY", "Skill", "warm_up", "LLM_FORBIDDEN"]

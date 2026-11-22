@@ -576,14 +576,13 @@ def report_success(status: dict, already: bool) -> int:
     if port_note:
         notes.append("Port note: " + port_note[0].upper() + port_note[1:] + ". Nothing to do - JARVIS found "
                      "a free port by itself.")
+    status = wait_for_llm(status)
+    say()
+    for kind, line in llm_lines(status):
+        for i, ln in enumerate(wrap(line, indent="           ", width=66)):
+            {"ok": ok, "bad": bad}.get(kind, note)(ln.strip()) if i == 0 else say(ln)
     tps, gpu = status.get("llm_tokens_per_s"), status.get("llm_gpu")
-    if status.get("llm_online") is False:
-        notes.append("The language model (Ollama) is not running yet, so replies are basic. "
-                     "INSTALL_JARVIS.bat installs and starts it.")
-    elif status.get("llm_state") == "loading":
-        notes.append("The language model is still loading into memory (the first start after switching "
-                     "the PC on can take a minute). Replies are quick once it has loaded, and it stays loaded.")
-    elif isinstance(tps, (int, float)) and tps < 6:
+    if status.get("llm_state") == "ready" and isinstance(tps, (int, float)) and tps < 6:
         where = "on the processor" if not gpu else "partly on the processor"
         notes.append(f"Replies are slow on this PC: the language model runs {where} at about {tps:.0f} "
                      "tokens a second. Run INSTALL_JARVIS.bat once more - it now picks a model sized "
@@ -602,6 +601,56 @@ def report_success(status: dict, already: bool) -> int:
                 say(("     - " + ln.strip()) if i == 0 else ln)
     say()
     return EXIT_OK
+
+
+# ------------------------------------------------------------------ language engine (v1.4.3)
+def wait_for_llm(status: dict, timeout: float = 40.0) -> dict:
+    """The brain starts Ollama by itself when it is not running: wait for that to settle
+    (not for a model download, which can take many minutes)."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        s = status.get("llm_state")
+        if s not in ("starting", None) and not (s == "offline" and time.time() - t0 < 8 and not status.get("llm_problem")):
+            return status
+        time.sleep(1.0)
+        st, body = common.backend_status()
+        if st == "ok" and body:
+            status = body
+    return status
+
+
+def llm_lines(status: dict) -> List[Tuple[str, str]]:
+    """[(ok|note|bad, text)] about the language engine: what works, and what to do."""
+    s = status.get("llm_state")
+    p = status.get("llm_problem") or {}
+    prog = status.get("llm_progress") or {}
+    out: List[Tuple[str, str]] = []
+    if s == "ready":
+        ver = f"Ollama {status.get('llm_version')}" if status.get("llm_version") else "Ollama"
+        out.append(("ok", f"Language engine: {status.get('llm')} on {ver} - ready."))
+    elif s == "loading":
+        out.append(("note", "The language model is loading into memory (the first start after switching the PC "
+                            "on can take a minute). Replies are quick once it has loaded."))
+    elif s == "pulling" and prog:
+        out.append(("note", f"Downloading the language model {prog.get('model')}: {prog.get('percent', 0):.0f}% done. "
+                            "Replies are basic until it finishes; JARVIS tells you when it is ready."))
+    elif s == "installing":
+        out.append(("note", "Installing the language engine (Ollama) - a few minutes."))
+    if p and p.get("code") not in ("model_missing", "installing"):
+        out.append(("bad", f"{p.get('message')} {p.get('fix')}"))
+    elif s in ("offline", "starting", "not_installed") and not p:
+        out.append(("bad", "The language engine (Ollama) is not answering yet; JARVIS keeps trying to start it. "
+                           "Type 'check the language engine' in the HUD for the reason."))
+    if status.get("llm_note"):
+        out.append(("note", status["llm_note"][0].upper() + status["llm_note"][1:] + "."))
+    if prog and s != "pulling":
+        out.append(("note", f"Downloading {prog.get('model')} in the background: {prog.get('percent', 0):.0f}% done."))
+    if status.get("llm_proxy_bypassed"):
+        out.append(("note", "A system proxy is set on this PC; JARVIS now connects to the local language engine "
+                            "directly, past it."))
+    if s != "ready" and (p or s in ("offline", "not_installed")):
+        out.append(("note", "For a guided check run TEST_LANGUAGE_ENGINE.bat."))
+    return out
 
 
 # ------------------------------------------------------------------ voice (v1.4.2)
@@ -678,6 +727,8 @@ def cmd_status() -> int:
     say(f"  HUD <-> brain      : {'connected' if st['connected'] else 'not connected'}")
     s, body = common.backend_status()
     if s == "ok" and body:
+        for kind, line in llm_lines(body):
+            say(f"  language engine    : [{kind}] {line}")
         for kind, line in voice_lines(body):
             say(f"  voice              : [{kind}] {line}")
     for p in common.find_jarvis_processes():

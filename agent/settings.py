@@ -5,8 +5,8 @@ Validated, hot-applied settings for the holographic Settings panel (requirement 
 options for continuous adjustment).
 
 Only keys listed in SCHEMA (plus permission categories) can be changed from the UI, and
-every value is type/range checked before it is written. `run_shell_elevated` stays locked
-to "deny". Files are written atomically so a crash mid-save can't corrupt the config.
+every value is type/range checked before it is written. (v1.4.3: `run_shell_elevated` is no
+longer locked -- the user may allow administrator commands; Windows' UAC still asks each time.) Files are written atomically so a crash mid-save can't corrupt the config.
 """
 from __future__ import annotations
 
@@ -52,7 +52,12 @@ SCHEMA: Dict[str, dict] = {
 }
 
 PERMISSION_CHOICES = ["allow", "ask", "deny"]
-LOCKED_PERMISSIONS = {"run_shell_elevated"}
+LOCKED_PERMISSIONS: set = set()
+PERMISSION_LABELS = {
+    "run_shell": "Run shell commands (PowerShell)",
+    "run_shell_elevated": "Run shell commands as administrator (Windows asks each time)",
+    "install_software": "Install software (e.g. the language engine)",
+}
 
 
 def _get(d: dict, dotted: str, default: Any = None) -> Any:
@@ -150,7 +155,7 @@ def get_settings(config_path: str, permissions_path: str, options: Dict[str, Lis
     for cat, val in perms.get("categories", {}).items():
         key = f"permissions.{cat}"
         schema[key] = {"type": "choice", "choices": PERMISSION_CHOICES,
-                       "label": cat.replace("_", " "), "group": "permissions",
+                       "label": PERMISSION_LABELS.get(cat, cat.replace("_", " ")), "group": "permissions",
                        "locked": cat in LOCKED_PERMISSIONS}
         values[key] = val
     return {"schema": schema, "values": values}

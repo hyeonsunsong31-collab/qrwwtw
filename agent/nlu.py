@@ -122,6 +122,36 @@ def _rules():
                         r"\b(put on|play me|play some)\b\s+(?P<query>.+)$",
                         r"(?P<query>.+?)\s*(노래|음악|곡)?\s*(틀어|재생|들려|플레이)\s*(줘|주라|해)?$"]),
         # ---------------- microphone / volume / media ----------------
+        # ---------------- shell commands (v1.4.3) ----------------
+        ("shell_permission", [
+            r"\b(allow|enable|permit|let)\b.*\b(shell|powershell|terminal|command line|cmd)\b\s*(commands?|access|runs?)?",
+            r"\b(?P<level_ask>always ask|ask me)\b.*\b(before|for)\b.*\b(shell|powershell|terminal)\b",
+            r"\b(?P<level_deny>block|disable|forbid|deny|disallow|turn off)\b.*\b(shell|powershell|terminal)\b",
+            r"(셸|쉘|파워셸|파워쉘|터미널|명령어?\s*실행).*(?P<level_ko>허용|허락|켜|차단|막아|금지|물어)"]),
+        ("run_shell_elevated", [
+            r"^(please\s+)?(run|execute)\s+(this\s+)?(command\s+)?as\s+(an?\s+)?admin(istrator)?\s*[:,-]?\s*(?P<command>.+)$",
+            r"^(please\s+)?(run|execute)\s+(the\s+command\s+)?(?P<command>.+?)\s+as\s+(an?\s+)?admin(istrator)?$",
+            r"^(admin|elevated|administrator)\s+(powershell|shell|cmd|command|terminal)\s*[:>]\s*(?P<command>.+)$",
+            r"^관리자\s*(권한)?\s*(으로|로)\s*(?P<command>.+?)\s*(명령어?\s*)?(을|를)?\s*(실행|돌려)\s*(해|해줘|해\s*줘|줘)?$"]),
+        ("run_shell", [
+            r"^(please\s+)?(run|execute)\s+(the\s+|this\s+)?(shell\s+|powershell\s+|cmd\s+|terminal\s+)?command\s*[:,-]?\s*(?P<command>.+)$",
+            r"^(in|on|using)\s+(the\s+)?(powershell|shell|terminal|command prompt|cmd)\s*[,:]?\s*(run\s+|execute\s+)?(?P<command>.+)$",
+            r"^(powershell|shell|cmd|terminal|ps)\s*[:>]\s*(?P<command>.+)$",
+            r"^[$>]\s*(?P<command>\S.*)$",
+            r"^(셸|쉘|터미널|파워셸|파워쉘|명령\s*프롬프트|cmd)\s*(에서|으로|로)\s*(?P<command>.+?)\s*(을|를)?\s*(실행|돌려)\s*(해|해줘|해\s*줘|줘)?$",
+            r"^(?P<command>.+?)\s*(명령어?|커맨드)\s*(을|를)?\s*(실행|돌려)\s*(해|해줘|해\s*줘|줘)?$"]),
+        # ---------------- the language engine (Ollama) ----------------
+        ("llm_install", [r"\b(install|set up|setup|download|get)\b.*\b(language engine|ollama)\b",
+                         r"(언어\s*엔진|올라마|ollama).*(설치|깔아|받아)"]),
+        ("llm_status", [r"\b(?P<restart>restart|reconnect|reboot|start up|start|turn on)\b.*\b(language engine|language model|ollama|llm)\b",
+                        r"\b(check|test|diagnose|troubleshoot|fix|repair)\b.*\b(language engine|language model|ollama|llm|ai engine)\b",
+                        r"\b(language engine|language model|ollama|llm)\b.*\b(status|offline|not working|isn'?t working|down|problem|connect)",
+                        r"\bis (the |your )?(language engine|language model|ollama|llm)\b.*\b(running|working|online|up|ok)\b",
+                        r"\bwhy (are|is) (you|jarvis|the language engine|your language engine)\b.*\b(offline|not working|unavailable|disconnected)\b",
+                        r"\bwhy (can'?t|cannot|won'?t) you (think|talk|chat|answer properly|connect)\b",
+                        r"(언어\s*엔진|언어\s*모델|올라마|ollama|llm).*(?P<restart_ko>다시\s*시작|재시작|켜)",
+                        r"(언어\s*엔진|언어\s*모델|올라마|ollama|llm).*(확인|점검|상태|안\s*돼|안돼|안\s*되|연결|문제|오프라인|고쳐)",
+                        r"왜.*(오프라인|연결이?\s*안|연결되지\s*않|제대로\s*대답)"]),
         ("mic_settings", [r"\b(open|show|go to)\b.*\b(mic|microphone)\b.*\b(privacy|permission|access|settings?)\b",
                           r"\b(mic|microphone)\s+(privacy|permission|access)\b",
                           r"마이크.*(개인\s*정보|권한|설정).*(열어|보여|가|띄워)"]),
@@ -184,7 +214,9 @@ def _rules():
 
 _COMPILED = [(name, [re.compile(p, re.IGNORECASE) for p in pats]) for name, pats in _rules()]
 _STOPWORDS_APP = {"the", "my", "me", "please", "now", "a", "an", "up", "로", "을", "를", "좀"}
-_NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "voice_status", "mic_settings", "stop_music", "open_space3d", "close_space3d",
+_NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "voice_status", "mic_settings", "llm_status", "llm_install",
+                   "shell_permission",
+                   "stop_music", "open_space3d", "close_space3d",
                    "clone_object", "system_info", "sleep_assistant", "delete_object",
                    "save_project", "export_model", "neural_view", "wallpaper_on", "wallpaper_off",
                    "open_jarvis_settings", "screenshot", "show_desktop", "toggle_gesture",
@@ -237,6 +269,23 @@ def parse_intent(text: str, lang: Optional[str] = None) -> Intent:
                     args["about"] = "purpose"
                 else:
                     args["about"] = "self"
+            if name in ("run_shell", "run_shell_elevated"):
+                mt = pat.search(t)                       # keep the command exactly as typed
+                if mt and mt.groupdict().get("command"):
+                    args["command"] = mt.group("command").strip()
+            if name == "shell_permission":
+                admin = bool(re.search(r"\badmin(istrator)?\b|\belevated\b|관리자", tl))
+                ko_level = args.pop("level_ko", None)
+                if args.pop("level_deny", None) or (ko_level and re.search(r"차단|막아|금지", ko_level)):
+                    level = "deny"
+                elif args.pop("level_ask", None) or (ko_level and "물어" in ko_level):
+                    level = "ask"
+                else:
+                    level = "allow"
+                args = {"level": level, "scope": "admin" if admin else "normal"}
+            if name == "llm_status":
+                restart = args.pop("restart", None) or args.pop("restart_ko", None)
+                args = {"restart": "yes"} if restart else {}
             if name == "toggle_gesture":
                 args["state"] = "off" if re.search(r"\boff\b|꺼|끄기|비활성", tl) else "on"
             conf = 0.8 if args or name in _NO_ARG_INTENTS else 0.6

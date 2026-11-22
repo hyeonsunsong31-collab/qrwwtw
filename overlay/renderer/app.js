@@ -194,6 +194,7 @@ function toast(title, body, kind = "", ms = 6000, opts = {}) {
   const page = { "ms-settings:privacy-microphone": "privacy-microphone", "ms-settings:sound": "sound" }[opts.action];
   if (page) actions.push([t("open_fix"), () => bus.send({ type: "open_settings_page", page })]);
   if (opts.check) actions.push([t("check_mic"), () => { chat.show(); bus.command(getLang() === "ko" ? "마이크 확인해 줘" : "check the microphone", "text"); }]);
+  (opts.buttons || []).forEach((b) => actions.push(b));
   if (actions.length) {
     const row = document.createElement("div"); row.className = "row";
     actions.forEach(([label, fn]) => { const b = document.createElement("button"); b.textContent = label;
@@ -317,12 +318,48 @@ function backendSpeaks() {
   return !!status.voice && !(d && d.tts && d.tts.state === "failed");
 }
 
+/* ------------------------------------------------- language engine (v1.4.3) ---- */
+function llmText() {
+  const s = status.llm_state, prog = status.llm_progress;
+  const pct = prog ? ` ${Math.round(prog.percent || 0)}%` : "";
+  if (s === "pulling" && prog) return t("llm_downloading") + pct;
+  if (s === "starting") return t("llm_starting");
+  if (s === "installing") return t("llm_installing");
+  if (s === "not_installed") return t("llm_not_installed");
+  if (status.llm_online === false) return t("llm_offline");
+  if (s === "loading") return t("llm_warming");
+  if (s === "error") return t("llm_error");
+  if (prog) return t("llm_downloading") + pct;          // working on an installed model meanwhile
+  return "";
+}
+
+let llmProblemCode = null, llmToast = null;
+function renderLlmProblem() {
+  const p = status.llm_problem || null;
+  const code = p ? p.code : null;
+  if (code === llmProblemCode) return;
+  llmProblemCode = code;
+  if (llmToast) { llmToast.remove(); llmToast = null; }
+  if (!p || code === "model_missing" || code === "installing") return;    // the readout shows progress
+  const ko = getLang() === "ko";
+  const buttons = [[t("llm_check"), () => { chat.show(); bus.command(ko ? "언어 엔진 확인해 줘" : "check the language engine", "text"); }]];
+  if (p.action === "install") buttons.push([t("llm_install_btn"), () => { chat.show(); bus.command(ko ? "언어 엔진 설치해 줘" : "install the language engine", "text"); }]);
+  llmToast = toast(t("toast_llm"), ko ? p.message_ko : p.message, "danger", 45000, { fix: ko ? p.fix_ko : p.fix, buttons });
+}
+
 function renderStatus() {
   const act = Number(status.neurons_active || 0).toLocaleString();
   const nom = Number(status.neurons_nominal || 2e11).toExponential(1);
-  const llm = status.llm_online === false ? ` · ${t("llm_offline")}`
-            : status.llm_state === "loading" ? ` · ${t("llm_warming")}` : "";
-  neuralReadout.textContent = `neural mesh · ${act} / ${nom}` + llm;
+  const txt = llmText();
+  neuralReadout.textContent = `neural mesh · ${act} / ${nom}` + (txt ? ` · ${txt}` : "");
+  const tip = [];
+  if (status.llm && status.llm !== "offline-fallback") tip.push(`model: ${status.llm}`);
+  if (status.llm_host) tip.push(`engine: Ollama ${status.llm_version || ""} at ${status.llm_host}`.replace("  ", " "));
+  if (status.llm_note) tip.push(status.llm_note);
+  if (status.llm_problem) tip.push((getLang() === "ko" ? status.llm_problem.message_ko : status.llm_problem.message) || "");
+  if (status.llm_proxy_bypassed) tip.push("system proxy bypassed for the local engine");
+  neuralReadout.title = tip.join("\n");
+  renderLlmProblem();
 }
 
 bus.on("hello", (m) => {

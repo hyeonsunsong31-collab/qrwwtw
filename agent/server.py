@@ -27,6 +27,12 @@ the supervisor read. Nothing on the event loop waits for the network or for mode
 and the heavy warm-ups (speech, then the language model) run one after another in the
 background so they do not fight over the CPU.
 
+LANGUAGE ENGINE (v1.4.3): the brain keeps Ollama working by itself -- it starts it (or moves
+it off a blocked port), downloads a missing model while using one that is installed, and
+steps down to a smaller model when memory is short (agent/llm_ollama.py, agent/ollama_service.py).
+/status reports llm_state / llm_problem / llm_note / llm_progress, the HUD and the launcher
+show them, and JARVIS says what is wrong and how to fix it when the engine cannot be used.
+
 VOICE (v1.4.2): the voice engine starts with the microphone and the wake word, and loads the
 British voice and Whisper in the background. What it hears -- the microphone level, problems
 (muted, blocked by Windows privacy, no device), near misses and commands it could not make
@@ -62,8 +68,9 @@ from . import settings as settings_mod
 from .orchestrator import Orchestrator, ACK
 from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM, keep_alive_value
+from .ollama_service import is_loopback
 
-VERSION = "1.4.2"
+VERSION = "1.4.3"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -275,13 +282,17 @@ class JarvisServer:
                                 model=llm_cfg.get("model", "auto"),
                                 candidates=llm_cfg.get("model_candidates", {}),
                                 keep_alive=llm_cfg.get("keep_alive", "always"),
-                                num_ctx=int(llm_cfg.get("context_tokens", 4096)))
+                                num_ctx=int(llm_cfg.get("context_tokens", 4096)),
+                                data_dir=data_dir, on_model_change=self._remember_model,
+                                manage=bool(llm_cfg.get("manage_engine", True)))
         self.orch = Orchestrator(self.config, self.llm, recorder=self.recorder,
                                  control=self.control, permissions=self.permissions,
                                  emit=self._emit)
         self.token = write_session_token(os.path.join(data_dir, "session.token"))
-        from agent.skills import voicecheck
+        from agent.skills import voicecheck, llmcheck, shell
         voicecheck.set_provider(self.voice_report)       # "check the microphone" reads the live report
+        llmcheck.set_provider(self.llm)                  # "check the language engine" / "install ..."
+        shell.set_permission_writer(self.apply_permission)   # "allow shell commands" (user only)
         self._pending_perms: Dict[str, asyncio.Future] = {}
         self._current: Optional[asyncio.Task] = None
         self.voice = None  # set by attach_voice()
@@ -300,6 +311,10 @@ class JarvisServer:
                 "llm": self.llm.model_name(), "llm_online": self.llm.cached_online(),
                 "llm_state": self.llm.state, "llm_error": self.llm.error or None,
                 "llm_tokens_per_s": self.llm.stats.get("tokens_per_s"),
+                "llm_problem": self.llm.problem, "llm_note": self.llm.note or None,
+                "llm_progress": self.llm.progress, "llm_host": self.llm.service.base,
+                "llm_version": self.llm.service.version,
+                "llm_proxy_bypassed": bool(self.llm.service.proxy and is_loopback(self.llm.service.base)),
                 "llm_gpu": self.llm.stats.get("gpu"), "llm_load_seconds": self.llm.stats.get("load_seconds"),
                 "neural_settle_ms": getattr(self.mesh, "settle_ms", None),
                 "port": self.port, "startup": self.startup,
@@ -369,6 +384,45 @@ class JarvisServer:
 
     async def on_voice_state(self, state: str):
         await self.manager.broadcast({"type": "state", "state": state, "source": "voice"})
+
+    def apply_permission(self, category: str, level: str) -> dict:
+        """Change one permission category (the user said "allow shell commands" and confirmed)."""
+        result = settings_mod.apply_settings({f"permissions.{category}": level}, self.config_path,
+                                             self.permissions_path)
+        self.permissions.reload()
+        self.recorder.audit("permission_change", category, level,
+                            detail={"applied": result["applied"], "rejected": result["rejected"]})
+        return result
+
+    def _remember_model(self, model: str):
+        """The language engine stepped down to a smaller model (memory): keep that choice."""
+        try:
+            settings_mod.apply_settings({"llm.model": model}, self.config_path, self.permissions_path)
+            self.config.setdefault("llm", {})["model"] = model
+            print(f"[jarvis] language model set to {model} (it fits this PC's memory)", flush=True)
+        except Exception as e:
+            print(f"[jarvis] could not save the language model choice: {e!r}", flush=True)
+
+    async def on_llm_change(self, prev_state: str, prev_code: Optional[str]):
+        """Say what keeps the language engine from working (once per problem per 10 minutes),
+        and that it works again after it had a problem."""
+        p = self.llm.problem or {}
+        code = p.get("code")
+        lasting = {"not_installed", "start_failed", "remote_down", "install_failed", "pull_failed",
+                   "no_space", "memory", "load_failed"}
+        lang = self.voice_lang()
+        if code in lasting and code != prev_code and self._due("llm:" + code, 600):
+            text = f"{p.get('message_ko')} {p.get('fix_ko')}" if lang == "ko" else f"{p.get('message')} {p.get('fix')}"
+            try:
+                self.recorder.log_explanation("error", f"language engine: {p.get('message')} {p.get('fix')}")
+            except Exception:
+                pass
+            await self.notify(text.strip(), lang)
+        elif self.llm.state == "ready" and prev_state != "ready" and self._said_at.get("llm_problem_spoken"):
+            self._said_at.pop("llm_problem_spoken", None)
+            await self.notify("My language engine is ready, sir." if lang != "ko" else "언어 엔진이 준비되었습니다, sir.", lang)
+        if code in lasting:
+            self._said_at["llm_problem_spoken"] = time.time()
 
     def attach_voice(self, engine):
         self.voice = engine
@@ -736,21 +790,35 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
         while True:
             try:
                 system = srv.orch.system_prompt(srv.orch.default_lang)
-                changed = await asyncio.to_thread(srv.llm.ensure_warm, system)
+                prev_state, prev_code = srv.llm.state, (srv.llm.problem or {}).get("code")
+                job = asyncio.ensure_future(asyncio.to_thread(srv.llm.ensure_warm, system))
+                seen = None
+                while not job.done():               # starting Ollama / downloading: keep the HUD posted
+                    await asyncio.wait([job], timeout=2.0)
+                    sig = (srv.llm.state, (srv.llm.problem or {}).get("code"),
+                           int((srv.llm.progress or {}).get("percent") or 0))
+                    if sig != seen and not job.done():
+                        seen = sig
+                        await srv.manager.broadcast({"type": "status", "status": srv.status()})
+                changed = job.result()
                 if srv.llm.state == "ready" and srv.llm.stats.get("warmed_at") and last != "ready":
                     st = srv.llm.stats
                     print(f"[jarvis] language model {st.get('model')} ready: loaded in {st.get('load_seconds')} s, "
                           f"{st.get('tokens_per_s')} tokens/s, {int(100 * (st.get('gpu') or 0))}% on the GPU", flush=True)
-                elif srv.llm.state == "error" and last != "error":
-                    print(f"[jarvis] language model could not be loaded: {srv.llm.error}", flush=True)
+                elif srv.llm.state != last and srv.llm.state in ("error", "not_installed", "offline", "pulling"):
+                    p = srv.llm.problem or {}
+                    print(f"[jarvis] language engine {srv.llm.state}: {p.get('message') or srv.llm.error or ''} "
+                          f"{p.get('fix') or ''}".rstrip(), flush=True)
                 if changed or srv.llm.state != last:
                     last = srv.llm.state
                     await srv.manager.broadcast({"type": "status", "status": srv.status()})
+                    await srv.on_llm_change(prev_state, prev_code)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 print(f"[jarvis] warm-up check failed: {e!r}", flush=True)
-            await asyncio.sleep(60 if srv.llm.state == "ready" else 5)
+            busy = srv.llm.state in ("pulling", "installing", "starting") or srv.llm.progress
+            await asyncio.sleep(2 if busy else 60 if srv.llm.state == "ready" else 5)
 
     @asynccontextmanager
     async def lifespan(app):

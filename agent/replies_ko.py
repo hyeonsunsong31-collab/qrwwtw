@@ -24,6 +24,11 @@ def _sysinfo(r: dict) -> str:
 Reply = Union[str, Callable[[dict], str]]
 
 OK: Dict[str, Reply] = {
+    "run_shell": lambda r: _d(r, "speak_ko", "완료했습니다, sir."),
+    "run_shell_elevated": lambda r: _d(r, "speak_ko", "완료했습니다, sir."),
+    "shell_permission": lambda r: _d(r, "speak_ko", "권한을 변경했습니다, sir."),
+    "llm_status": lambda r: _d(r, "speak_ko", "언어 엔진 상태를 확인했습니다, sir."),
+    "llm_install": lambda r: _d(r, "speak_ko", "언어 엔진 설치를 시작했습니다, sir."),
     "voice_status": lambda r: _d(r, "speak_ko", "음성 상태를 확인했습니다, sir."),
     "mic_settings": "마이크 개인 정보 설정을 엽니다, sir. '마이크 액세스'와 '데스크톱 앱이 마이크에 액세스하도록 허용'을 켜 주세요.",
     "open_space3d": "3D 프로젝트 공간을 띄우겠습니다, sir.",
@@ -77,6 +82,11 @@ OK: Dict[str, Reply] = {
 
 FAIL_DEFAULT = "죄송합니다, sir. 그 작업을 완료하지 못했습니다."
 FAIL: Dict[str, Reply] = {
+    "run_shell": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
+    "run_shell_elevated": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
+    "shell_permission": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
+    "llm_status": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
+    "llm_install": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
     "self_describe": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
     "self_remember": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
     "self_forget": lambda r: _d(r, "speak_ko", FAIL_DEFAULT),
