@@ -103,6 +103,9 @@ def localize(intent: str, result: dict, lang: str) -> str:
     speak = result.get("speak", "") or ""
     if lang != "ko":
         return speak
+    own = (result.get("data") or {}).get("speak_ko")
+    if own:                                   # the skill phrased it in Korean itself
+        return own
     template = OK.get(intent) if result.get("ok") else FAIL.get(intent, FAIL_DEFAULT)
     if template is None:
         return speak

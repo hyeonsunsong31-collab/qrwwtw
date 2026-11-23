@@ -7,7 +7,9 @@ import { t } from "./i18n.js";
 // id, icon, label key, and the action: cmd (send a command), ui (local toggle),
 // prefill (put a command starter in the chat box), act (overlay-only action)
 const FEATURES = [
-  { id: "space3d",   ic: "🧊", key: "feat.space3d",   cmd: "open the 3D project space" },
+  // while the 3D space is open this button closes it (label "Close 3D")
+  { id: "space3d",   ic: "🧊", key: "feat.space3d",   cmd: "open the 3D project space",
+    whenOpen: { key: "feat.space3d_close", cmd: "close the 3D project space" } },
   { id: "addobj",    ic: "➕", key: "feat.addobj",    cmd: "add an object" },
   { id: "clone",     ic: "⧉",  key: "feat.clone",     cmd: "clone the object" },
   { id: "delete",    ic: "✖",  key: "feat.delete",    cmd: "delete the object" },
@@ -34,7 +36,8 @@ const FEATURES = [
 ];
 
 export function initButtons(handlers) {
-  // handlers: { onUi(action), toggleChat(), focusChat(prefill, suffix), openSettings(), wake() }
+  // handlers: { onUi(action), toggleChat(), focusChat(prefill, suffix), openSettings(), wake(),
+  //             space3dOpen() }
   const reactor = document.getElementById("reactor");
   reactor.addEventListener("click", () => handlers.wake());
 
@@ -68,9 +71,12 @@ export function initButtons(handlers) {
 
 function renderDock(dock, handlers) {
   dock.innerHTML = "";
-  FEATURES.forEach((f) => {
+  const open3d = !!(handlers.space3dOpen && handlers.space3dOpen());
+  FEATURES.forEach((feature) => {
+    const f = (open3d && feature.whenOpen) ? { ...feature, ...feature.whenOpen } : feature;
     const b = document.createElement("button");
     b.className = "feat";
+    b.dataset.feat = f.id;
     b.innerHTML = `<span class="fic">${f.ic}</span><span>${t(f.key)}</span>`;
     b.addEventListener("click", () => {
       if (f.cmd) bus.command(f.cmd, "text");

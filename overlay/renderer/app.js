@@ -49,10 +49,21 @@ async function ensureSpace3d() {
   return space3d;
 }
 
+const space3dOpen = () => !document.getElementById("space3d-container").classList.contains("hidden");
+
+/* The brain is told what is on screen, so a bare "close it" / "exit" / "go back" (voice or
+ * text) closes the 3D space while it is open (v1.5.0). Sent again after every reconnect. */
+function reportUiState() {
+  bus.send({ type: "ui_state", state: { space3d: space3dOpen() } });
+  if (buttons) buttons.rerenderLabels();             // the dock's 3D button becomes "Close 3D"
+}
+
 async function openSpace3d() {
+  const wasOpen = space3dOpen();
   document.getElementById("space3d-container").classList.remove("hidden");
   if (window.jarvis) window.jarvis.openSpace3d();
   buttons.showDock();
+  if (!wasOpen) reportUiState();
   const s = await ensureSpace3d();
   if (!s) return null;
   s.open();
@@ -61,11 +72,13 @@ async function openSpace3d() {
 }
 
 function closeSpace3d() {
+  const wasOpen = space3dOpen();
   stopNeural();
   if (space3d) { space3d.hideNeural(); space3d.close(); }
   document.getElementById("space3d-container").classList.add("hidden");
   buttons.hideDock();
   if (window.jarvis) window.jarvis.closeSpace3d();
+  if (wasOpen) reportUiState();
 }
 
 async function setWallpaper(on) {
@@ -207,19 +220,27 @@ function toast(title, body, kind = "", ms = 6000, opts = {}) {
   return el;
 }
 
+const permToasts = new Map();          // request id -> toast (removed when answered by voice / text too)
 function permissionToast(msg) {
   const el = document.createElement("div");
   el.className = "toast" + ((msg.risk || 0) >= 0.7 ? " danger" : "");
-  el.innerHTML = `<h4>${esc(t("perm_title"))}</h4>
-    <p><b>${esc(msg.action || msg.category)}</b><br>${esc(msg.detail)}</p>
+  // the plain question ("Shall I close Spotify, sir?"), then the exact detail (v1.5.0)
+  const head = msg.question ? `<p class="perm-q"><b>${esc(msg.question)}</b></p>` :
+                              `<p><b>${esc(msg.action || msg.category)}</b></p>`;
+  el.innerHTML = `<h4>${esc(t("perm_title"))}</h4>${head}
+    <p class="perm-detail">${esc(msg.detail)}</p>
+    <p class="perm-hint">${esc(t("perm_hint"))}</p>
     <div class="row"><button class="no">${esc(t("deny"))}</button><button class="ok">${esc(t("allow"))}</button></div>`;
-  const done = (granted) => { bus.permission(msg.request_id, granted); el.remove();
+  const close = () => { permToasts.delete(msg.request_id); if (el.isConnected) el.remove();
     if (window.jarvis) window.jarvis.setClickThrough(true); };
+  const done = (granted) => { bus.permission(msg.request_id, granted); close(); };
   el.querySelector(".ok").addEventListener("click", () => done(true));
   el.querySelector(".no").addEventListener("click", () => done(false));
   toastHost().appendChild(el); makeInteractive(el);
+  permToasts.set(msg.request_id, close);
   setTimeout(() => { if (el.isConnected) done(false); }, 85000);   // auto-deny before the server's timeout
 }
+function permissionResolved(msg) { const close = permToasts.get(msg.request_id); if (close) close(); }
 
 /* ------------------------------------------------------------ bus events ---- */
 function maybeSwitchLang(lang) {
@@ -404,6 +425,8 @@ bus.on("control", (m) => {
 bus.on("options", (m) => chat.setOptions(m.options || [], m.suggestions || []));
 bus.on("ui", (m) => handleUi(m.action, m.args || {}));
 bus.on("permission_request", permissionToast);
+bus.on("permission_resolved", permissionResolved);
+bus.on("timer_due", (m) => toast(t("toast_timer"), m.text || "", "", 15000));
 bus.on("listen_unavailable", (m) => {
   chat.setListening(false);
   toast(t("toast_voice"), t("listen_unavailable").replace("{reason}", m.reason || m.state || "?"), "danger", 9000);
@@ -437,6 +460,7 @@ function main() {
       inp.value = prefill; inp.dataset.suffix = suffix || "";
     },
     wake: () => { bus.wake(); buttons.reactor.classList.add("awake"); },
+    space3dOpen,
   });
   settings = initSettings({ makeInteractive });
   if (voiceBadge) voiceBadge.addEventListener("click", () => {
@@ -448,6 +472,11 @@ function main() {
   setState("idle");
   document.querySelectorAll(".interactive").forEach(makeInteractive);
   wirePreload();
+  bus.on("_open", reportUiState);                    // a restarted brain learns what is on screen
+  // Escape leaves the 3D space (it fills the screen; voice "close the 3D space" works too)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && space3dOpen()) { e.preventDefault(); closeSpace3d(); }
+  });
   if (window.jarvis && window.jarvis.ready) window.jarvis.ready();   // main shows the HUD and announces it
 }
 

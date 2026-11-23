@@ -1,4 +1,4 @@
-# 요구사항 → 구현 매핑 (v1.4.3)
+# 요구사항 → 구현 매핑 (v1.4.4)
 
 사용자가 제시한 21개 요구사항 + 추가 2개를 어디서/어떻게 구현했는지, 그리고 **어떻게 검증했는지**를 기록합니다.
 
@@ -46,7 +46,7 @@
 | 17 | 3D 공간 음성/텍스트로 열기 | `agent/skills/__init__.py` `open_space3d`, `app.js` | | ✅ 🌐 |
 | 18 | 3D 공간이 바탕화면 배경 대체 | `overlay/main.js` 배경화면 창, `overlay/native/workerw.ps1`, `renderer/wallpaper.html` | 별도 창을 아이콘 뒤 WorkerW 계층에 부착(24H2 포함), 실패 시 바탕화면 바로 위·모든 앱 아래로. HUD는 위에 유지. | 🌐(상태 전달) ⚙️(Windows 셸) |
 | 19 | 웹 음악 음성/텍스트 재생 | `agent/skills/music.py` | yt-dlp(venv 파이썬으로 실행) → ffplay/mpv, 실패 시 웹 플레이어. 주 1회 yt-dlp 갱신. | ⚙️ |
-| 20 | PC 전면 접근 에이전트 | `agent/skills/*` + `agent/permissions.py` | 파일·앱(시작 메뉴/UWP)·창·키보드·스크린샷·설정·브라우저·볼륨·마이크·장치·**PowerShell 셸(v1.4.3, 사용자가 허용 가능, 관리자는 UAC 경유, 위험 명령은 항상 확인)**. 권한 게이트+감사. | ✅(게이트·셸) ⚙️(Windows API) |
+| 20 | PC 전면 접근 에이전트 | `agent/skills/*` + `agent/permissions.py` + `agent/tools_spec.py` | 파일·앱(시작 메뉴/UWP)·창·키보드·스크린샷·설정·브라우저·볼륨·마이크·장치·**PowerShell 셸(v1.4.3, 사용자가 허용 가능, 관리자는 UAC 경유, 위험 명령은 항상 확인)**. 권한 게이트+감사. **v1.4.4: 명령이 실제로 실행됨** — 언어 모델의 네이티브 도구 호출(실제 qwen2.5:3b로 1/15 → 15/15), 말한 그대로의 표현 이해(문장부호·공손한 표현·한국어 어미), 허락을 말로 묻고 yes/no로 답함, 시간·타이머·알림·폴더·밝기·전원·잠금 추가, 3D 공간 음성 닫기. | ✅(게이트·셸·도구 호출·실제 모델) 🌐(3D 닫기·허락 질문) ⚙️(Windows API) |
 | 21 | 영국 신사 음성 | `voice/tts.py`, `config/jarvis.config.json` | Piper `en_GB-alan-medium` → Windows "George"(WinRT) → SAPI5. | ⚙️ |
 | + | 기본 언어 영어 | `config/jarvis.config.json` | | ✅ |
 | + | 더블클릭 영구작동 파일 | `INSTALL_JARVIS.bat` + `scripts/setup_windows.ps1` | 설치·화면 표시부·모델·음성·자동시작·자체 점검·실행·**표시 확인**. 재실행 시 이어하기·복구. | ✅(의존성 해결·런타임 다운로드·스크립트 정적 점검) ⚙️(실행) |

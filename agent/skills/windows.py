@@ -29,6 +29,69 @@ def _pg():
     return pyautogui
 
 
+# JARVIS's own windows: when you type a command into the HUD, the HUD has the keyboard focus,
+# so "type ...", "copy that" or "maximise this window" must act on the window UNDER it (v1.5.0)
+OWN_TITLES = {"jarvis", "jarvis wallpaper", "jarvis 3d"}
+
+
+def _own(w) -> bool:
+    return (getattr(w, "title", "") or "").strip().lower() in OWN_TITLES
+
+
+def _target_window():
+    """The window the user means by "this window": the active one, unless it is JARVIS's HUD --
+    then the topmost real window beneath it."""
+    gw = _gw()
+    act = gw.getActiveWindow()
+    if act is not None and not _own(act) and (act.title or "").strip():
+        return act
+    for w in gw.getAllWindows():                       # top to bottom
+        t = (w.title or "").strip()
+        if not t or _own(w) or t in ("Program Manager", "Windows Input Experience", "Start", "Search"):
+            continue
+        try:
+            if w.isMinimized or w.width < 60 or w.height < 60:
+                continue
+        except Exception:
+            continue
+        return w
+    return act
+
+
+def _activate(w) -> bool:
+    """Bring a window to the front (Windows only lets the foreground app do that, so a tap of
+    Alt first counts as user input)."""
+    try:
+        if w.isMinimized:
+            w.restore()
+        w.activate()
+    except Exception:
+        try:
+            _pg().press("alt")
+            w.activate()
+        except Exception:
+            return False
+    import time
+    time.sleep(0.15)
+    return True
+
+
+def _focus_for_input() -> str:
+    """Make sure keystrokes go to the user's app, not to the HUD; returns its title."""
+    try:
+        gw = _gw()
+        act = gw.getActiveWindow()
+        if act is not None and not _own(act):
+            return act.title or ""
+        w = _target_window()
+        if w is not None and not _own(w):
+            _activate(w)
+            return w.title or ""
+    except Exception:
+        pass
+    return ""
+
+
 def _find_window(title: str):
     gw = _gw()
     wins = [w for w in gw.getAllWindows() if (w.title or "").strip()]
@@ -36,7 +99,7 @@ def _find_window(title: str):
         return None
     q = (title or "").strip().lower()
     if not q:
-        return gw.getActiveWindow()
+        return _target_window()
     for w in wins:
         if w.title.lower() == q:
             return w
@@ -117,13 +180,15 @@ def type_text(text: str = "", **_) -> dict:
         return fail("What should I type, sir?")
     try:
         pg = _pg()
+        target = _focus_for_input() if IS_WINDOWS else ""
         if text.isascii():
             pg.write(text, interval=0.01)
         else:  # Korean and other non-ASCII text: paste through the clipboard
             import pyperclip  # type: ignore
             pyperclip.copy(text)
             pg.hotkey("ctrl", "v")
-        return ok("Typed it, sir.", {"chars": len(text)})
+        return ok("Typed it, sir." if not target else f"Typed it into {target}, sir.",
+                  {"chars": len(text), "window": target, "speak_ko": "입력했습니다, sir."})
     except Exception as e:
         return fail("I couldn't type into the current window, sir.", str(e))
 
@@ -134,9 +199,14 @@ def press_keys(keys: str = "", **_) -> dict:
         return fail("Which keys, sir?")
     try:
         pg = _pg()
+        alias = {"control": "ctrl", "windows": "win", "escape": "esc", "return": "enter", "del": "delete",
+                 "cmd": "win", "option": "alt", "pgup": "pageup", "pgdn": "pagedown"}
+        parts = [alias.get(p, p) for p in parts]
         unknown = [p for p in parts if p not in pg.KEYBOARD_KEYS]
         if unknown:
             return fail(f"I don't recognise the key {unknown[0]}, sir.")
+        if IS_WINDOWS:
+            _focus_for_input()
         pg.hotkey(*parts)
         return ok(f"Pressed {'+'.join(parts)}, sir.", {"keys": parts})
     except Exception as e:

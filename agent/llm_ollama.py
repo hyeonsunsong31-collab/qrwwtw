@@ -159,13 +159,38 @@ def classify(e: BaseException) -> Tuple[str, str]:
     return "other", f"{name}: {text}"[:200]
 
 
+class ToolsUnsupported(RuntimeError):
+    """This model has no tool calling (Ollama answers 400 '... does not support tools')."""
+
+
+def _tool_calls(msg: dict) -> List[dict]:
+    out = []
+    for tc in msg.get("tool_calls") or []:
+        fn = (tc or {}).get("function") or {}
+        if fn.get("name"):
+            args = fn.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {"_text": args}
+            out.append({"name": fn["name"], "arguments": args or {}})
+    return out
+
+
 def _messages(system: str, user: str, history: Optional[List[dict]]) -> List[dict]:
     """System + history + the new message. The history is NOT windowed here: a window that
     slides by one turn every request changes the prompt prefix every time, so Ollama would
     re-read the whole conversation. The orchestrator trims it in larger steps instead."""
     msgs = [{"role": "system", "content": system}]
     for h in history or []:
-        msgs.append({"role": h["role"], "content": h["text"]})
+        m = {"role": h["role"], "content": h.get("text", "")}
+        if h.get("calls"):                     # an assistant turn that called tools (v1.5.0)
+            m["tool_calls"] = [{"function": {"name": c["name"], "arguments": c.get("arguments") or {}}}
+                               for c in h["calls"]]
+        if h["role"] == "tool" and h.get("name"):
+            m["tool_name"] = h["name"]
+        msgs.append(m)
     msgs.append({"role": "user", "content": user})
     return msgs
 
@@ -307,6 +332,66 @@ class OllamaLLM:
             r.raise_for_status()
             return r.json().get("message", {}).get("content", "").strip()
 
+    def chat_stream_events(self, system: str, user: str, history: Optional[List[dict]] = None,
+                           params: Optional[dict] = None, tools: Optional[List[dict]] = None,
+                           stop_event: Optional[threading.Event] = None) -> Iterator[Tuple[str, object]]:
+        """Like chat_stream, with tools the model may call: yields ("text", piece) while it
+        writes and ("tools", [{"name", "arguments"}, ...]) when it calls tools. Raises
+        ToolsUnsupported for a model without tool calling."""
+        if httpx is None:
+            raise RuntimeError("httpx not installed")
+        body = self._body(system, user, history, params, True)
+        if tools:
+            body["tools"] = tools
+        with self._client() as c:
+            with c.stream("POST", f"{self.host}/api/chat", json=body) as r:
+                if r.status_code >= 400:
+                    r.read()
+                    text = r.text or ""
+                    if tools and r.status_code == 400 and "tool" in text.lower() and "support" in text.lower():
+                        raise ToolsUnsupported(text[:200])
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if stop_event is not None and stop_event.is_set():
+                        break
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    if obj.get("error"):
+                        err = str(obj["error"])
+                        if tools and "tool" in err.lower() and "support" in err.lower():
+                            raise ToolsUnsupported(err[:200])
+                        raise RuntimeError(err[:300])
+                    msg = obj.get("message", {}) or {}
+                    calls = _tool_calls(msg)
+                    if calls:
+                        yield ("tools", calls)
+                    piece = msg.get("content", "")
+                    if piece:
+                        yield ("text", piece)
+                    if obj.get("done"):
+                        break
+
+    def chat_json(self, system: str, user: str, schema: dict, params: Optional[dict] = None,
+                  timeout: float = 60.0) -> dict:
+        """One reply forced into a JSON schema (Ollama structured output)."""
+        if httpx is None:
+            raise RuntimeError("httpx not installed")
+        body = self._body(system, user, [], params or {"temperature": 0.0, "num_predict": 200}, False)
+        body["format"] = schema
+        with self._client(timeout) as c:
+            r = c.post(f"{self.host}/api/chat", json=body)
+            r.raise_for_status()
+            content = r.json().get("message", {}).get("content", "") or "{}"
+        try:
+            out = json.loads(content)
+        except ValueError:
+            return {}
+        return out if isinstance(out, dict) else {}
+
     def chat_stream(self, system: str, user: str, history: Optional[List[dict]] = None,
                     params: Optional[dict] = None,
                     stop_event: Optional[threading.Event] = None) -> Iterator[str]:
@@ -416,6 +501,8 @@ class ResilientLLM:
         self._override = ""             # a smaller model chosen after a memory error
         self._too_big: set = set()      # models that did not fit in the memory (never used as fallback)
         self._pull_thread: Optional[threading.Thread] = None
+        self._tools_ok: Dict[str, bool] = {}     # model -> it has native tool calling (v1.5.0)
+        self.tools_enabled = True
         self._pull_failed_at = 0.0
         self._pull_failures = 0
         self._recheck_models = True
@@ -741,6 +828,42 @@ class ResilientLLM:
             if kind == "memory":
                 self._warm_failed_at = 0.0          # let the next ensure_warm step down at once
         self.log(f"reply failed ({kind}): {msg}")
+
+    # --------------------------------------------------------- tools (v1.5.0) #
+    def supports_tools(self) -> bool:
+        """Whether replies use native tool calling: yes unless this model is known not to have it.
+        (Deliberately independent of whether Ollama answers right now: the instructions must stay
+        identical from turn to turn so Ollama can reuse its cache of them.)"""
+        return bool(self.tools_enabled and self._tools_ok.get(_norm(self.ollama.model), True))
+
+    def chat_stream_events(self, system, user, history=None, params=None, tools=None, stop_event=None):
+        if self.online() and not self._no_model:
+            yielded = False
+            try:
+                for ev in self.ollama.chat_stream_events(system, user, history, params, tools, stop_event):
+                    yielded = True
+                    yield ev
+                if tools:
+                    self._tools_ok[_norm(self.ollama.model)] = True
+                return
+            except ToolsUnsupported:
+                self._tools_ok[_norm(self.ollama.model)] = False
+                self.log(f"{self.ollama.model} has no tool calling; using action lines instead")
+                raise
+            except Exception as e:
+                self._note_failure(e)
+                if yielded:
+                    return
+        for piece in self.mock.chat_stream(system, user, history, params, stop_event):
+            yield ("text", piece)
+
+    def chat_json(self, system, user, schema, params=None) -> dict:
+        if self.online() and not self._no_model:
+            try:
+                return self.ollama.chat_json(system, user, schema, params)
+            except Exception as e:
+                self._note_failure(e)
+        return {}
 
     def chat(self, system, user, history=None, params=None) -> str:
         if self.online() and not self._no_model:

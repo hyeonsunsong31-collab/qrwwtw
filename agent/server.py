@@ -70,7 +70,7 @@ from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM, keep_alive_value
 from .ollama_service import is_loopback
 
-VERSION = "1.4.3"
+VERSION = "1.4.4"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -289,7 +289,9 @@ class JarvisServer:
                                  control=self.control, permissions=self.permissions,
                                  emit=self._emit)
         self.token = write_session_token(os.path.join(data_dir, "session.token"))
-        from agent.skills import voicecheck, llmcheck, shell
+        from agent.skills import voicecheck, llmcheck, shell, clock
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        clock.start(data_dir, notify=self._timer_due)    # timers and reminders (v1.5.0)
         voicecheck.set_provider(self.voice_report)       # "check the microphone" reads the live report
         llmcheck.set_provider(self.llm)                  # "check the language engine" / "install ..."
         shell.set_permission_writer(self.apply_permission)   # "allow shell commands" (user only)
@@ -485,6 +487,8 @@ class JarvisServer:
             await self._voice_unheard(ev)
 
     async def _voice_unheard(self, ev: dict):
+        if ev.get("kind") == "answer":
+            return                      # nobody answered aloud (maybe clicked Allow / Deny): say nothing
         reason, kind = ev.get("reason"), ev.get("kind")
         await self.manager.broadcast({**ev, "type": "voice_hint", "code": "unheard"})   # the HUD's toast
         if reason == "mic_problem":
@@ -530,6 +534,19 @@ class JarvisServer:
         await self.manager.broadcast({"type": "ui", "action": "announce", "args": {"reason": reason}})
         return len(self.manager.active)
 
+    def _timer_due(self, ev: dict):
+        """A timer or reminder is due (called from the timer thread)."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        lang = ev.get("lang") or self.voice_lang()
+        text = ev.get("ko") if lang == "ko" else ev.get("en")
+
+        async def say():
+            await self.manager.broadcast({"type": "timer_due", "id": ev.get("id"), "text": text, "lang": lang})
+            await self.notify(text or "", lang)
+        asyncio.run_coroutine_threadsafe(say(), loop)
+
     async def notify(self, text: str, lang: str = "en"):
         """Speak + show a short assistant line that isn't the reply to a command."""
         self.recorder.log_conversation("assistant", text, lang=lang)
@@ -538,19 +555,61 @@ class JarvisServer:
 
     # ------------------------------------------------- permission asker #
     async def _ask_user(self, request: dict) -> bool:
+        """Ask before an action: a toast with Allow / Deny, and (v1.5.0) the question spoken
+        aloud -- then JARVIS listens for the answer without the wake phrase. A spoken or typed
+        "yes" / "no" answers it (submit_command)."""
         rid = "perm_" + uuid.uuid4().hex[:10]
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending_perms[rid] = fut
         await self.manager.broadcast({"type": "permission_request", "request_id": rid, **request})
+        question = (request.get("question") or "").strip()
+        lang = request.get("lang") or self.voice_lang()
+        if question:
+            hint = " (예 또는 아니요로 답해 주세요.)" if lang == "ko" else " (Say or type yes or no.)"
+            await self._emit({"type": "transcript", "role": "assistant", "text": question + hint, "lang": lang,
+                              "kind": "question", "request_id": rid})
+            await self._emit({"type": "say", "text": question, "lang": lang})
+            if self.voice is not None:
+                try:
+                    self.voice.begin_capture(after_speech=True, kind="answer")
+                except TypeError:                      # an older engine without answer captures
+                    self.voice.begin_capture(after_speech=True)
+                except Exception:
+                    pass
+        granted = False
         try:
-            return await asyncio.wait_for(fut, timeout=90)
+            granted = bool(await asyncio.wait_for(fut, timeout=90))
+            return granted
         except asyncio.TimeoutError:
             return False
         finally:
             self._pending_perms.pop(rid, None)
+            await self.manager.broadcast({"type": "permission_resolved", "request_id": rid, "granted": granted})
 
     # ------------------------------------------------- command handling #
+    def answer_permission(self, granted: bool) -> bool:
+        """Answer the most recent open permission question; False when there is none."""
+        for rid in reversed(list(self._pending_perms)):
+            fut = self._pending_perms.get(rid)
+            if fut is not None and not fut.done():
+                fut.set_result(bool(granted))
+                return True
+        return False
+
     async def submit_command(self, text: str, source: str = "text"):
+        # "yes" / "no" while JARVIS waits for permission answers it -- before v1.5.0 it was a new
+        # command that cancelled the very action waiting for the answer
+        if self._pending_perms:
+            from .nlu import answer_yes_no, detect_language
+            ans = answer_yes_no(text)
+            if ans is not None and self.answer_permission(ans):
+                lang = detect_language(text)
+                self.recorder.log_command(text, source=source, lang=lang)
+                self.recorder.log_conversation("user", text, lang=lang)
+                await self._emit({"type": "transcript", "role": "user", "text": text, "lang": lang})
+                if not ans:
+                    await self.manager.broadcast({"type": "stop_tts"})
+                return
         # a new command interrupts any in-flight reply (requirement 13)
         await self.interrupt(stop_speech=True)
         self._current = asyncio.create_task(self.orch.handle_command(text, source=source))
@@ -682,6 +741,12 @@ class JarvisServer:
                 self.voice.set_listening(enabled)
                 await self.manager.broadcast({"type": "state", "state": "idle" if enabled else "muted"})
             self.recorder.log_command(f"[ui] {action}", source="ui")
+        elif t == "ui_state":
+            # what the HUD shows (the 3D space open or not): commands are read in that context
+            state = msg.get("state") if isinstance(msg.get("state"), dict) else {}
+            for key in ("space3d",):
+                if key in state:
+                    self.orch.ui_context[key] = bool(state[key])
         elif t == "neural_points":
             n = max(200, min(6000, int(msg.get("max_points", 3000))))
             await self.manager.send(ws, {"type": "neural_points", **self.mesh.sample_points(n)})
@@ -822,6 +887,7 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
 
     @asynccontextmanager
     async def lifespan(app):
+        srv._loop = asyncio.get_running_loop()
         voice_task = None
         if start_voice and srv.config.get("voice", {}).get("enabled", True):
             voice_task = asyncio.create_task(start_voice_engine())

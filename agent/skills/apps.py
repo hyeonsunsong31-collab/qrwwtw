@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import threading
+import re
 import time
 from typing import List, Optional, Tuple
 
@@ -39,8 +40,36 @@ SYSTEM_TOOLS = {
     "control panel": "control", "제어판": "control",
     "settings": "ms-settings:", "설정": "ms-settings:",
     "camera": "microsoft.windows.camera:", "카메라": "microsoft.windows.camera:",
-    "terminal": "wt",
+    "terminal": "wt", "windows terminal": "wt", "터미널": "wt",
+    "노트패드": "notepad", "note pad": "notepad", "snipping tool": "snippingtool", "캡처 도구": "snippingtool",
+    "registry editor": "regedit", "regedit": "regedit", "device manager": "devmgmt.msc", "장치 관리자": "devmgmt.msc",
+    "disk management": "diskmgmt.msc", "services": "services.msc", "event viewer": "eventvwr.msc",
+    "character map": "charmap", "magnifier": "magnify", "on-screen keyboard": "osk", "화상 키보드": "osk",
+    "wordpad": "write", "sound settings": "ms-settings:sound", "display settings": "ms-settings:display",
+    "this pc": "explorer", "my computer": "explorer", "내 pc": "explorer",
+    "microsoft store": "ms-windows-store:", "store": "ms-windows-store:", "스토어": "ms-windows-store:",
+    "clock": "ms-clock:", "alarms": "ms-clock:", "시계": "ms-clock:", "photos": "ms-photos:", "사진": "ms-photos:",
+    "mail": "outlookmail:", "calendar": "outlookcal:", "weather": "bingweather:", "날씨": "bingweather:",
+    "maps": "bingmaps:", "지도": "bingmaps:", "xbox": "xbox:", "edge": "microsoft-edge:",
 }
+# Spoken name -> website, when no installed app has that name ("open YouTube")
+WEBSITES = {
+    "youtube": "https://www.youtube.com", "유튜브": "https://www.youtube.com", "youtube music": "https://music.youtube.com",
+    "google": "https://www.google.com", "구글": "https://www.google.com", "gmail": "https://mail.google.com",
+    "지메일": "https://mail.google.com", "google drive": "https://drive.google.com", "google maps": "https://maps.google.com",
+    "google translate": "https://translate.google.com", "naver": "https://www.naver.com", "네이버": "https://www.naver.com",
+    "papago": "https://papago.naver.com", "파파고": "https://papago.naver.com", "daum": "https://www.daum.net",
+    "facebook": "https://www.facebook.com", "페이스북": "https://www.facebook.com",
+    "instagram": "https://www.instagram.com", "인스타그램": "https://www.instagram.com", "인스타": "https://www.instagram.com",
+    "twitter": "https://x.com", "트위터": "https://x.com", "reddit": "https://www.reddit.com", "레딧": "https://www.reddit.com",
+    "netflix": "https://www.netflix.com", "넷플릭스": "https://www.netflix.com", "amazon": "https://www.amazon.com",
+    "github": "https://github.com", "깃허브": "https://github.com", "wikipedia": "https://www.wikipedia.org",
+    "위키백과": "https://ko.wikipedia.org", "chatgpt": "https://chatgpt.com", "linkedin": "https://www.linkedin.com",
+    "twitch": "https://www.twitch.tv", "트위치": "https://www.twitch.tv", "coupang": "https://www.coupang.com",
+    "쿠팡": "https://www.coupang.com", "tiktok": "https://www.tiktok.com", "틱톡": "https://www.tiktok.com",
+    "pinterest": "https://www.pinterest.com", "outlook web": "https://outlook.live.com",
+}
+_DOMAIN = re.compile(r"^[\w-]+(\.[\w-]+)+(/\S*)?$")
 # Spoken name -> how the app appears in the Start Menu (fuzzy-matched afterwards).
 SYNONYMS = {
     "chrome": "google chrome", "크롬": "google chrome",
@@ -57,7 +86,12 @@ PROCESS_NAMES = {
     "word": "winword", "excel": "excel", "powerpoint": "powerpnt", "outlook": "outlook",
     "notepad": "notepad", "메모장": "notepad", "calculator": "calculatorapp", "계산기": "calculatorapp",
     "spotify": "spotify", "vscode": "code", "vs code": "code", "discord": "discord",
-    "teams": "ms-teams", "카카오톡": "kakaotalk", "kakaotalk": "kakaotalk",
+    "teams": "ms-teams", "카카오톡": "kakaotalk", "kakaotalk": "kakaotalk", "카톡": "kakaotalk",
+    "노트패드": "notepad", "그림판": "mspaint", "paint": "mspaint", "task manager": "taskmgr", "작업 관리자": "taskmgr",
+    "explorer": "explorer", "file explorer": "explorer", "탐색기": "explorer", "steam": "steam", "스팀": "steam",
+    "워드": "winword", "엑셀": "excel", "파워포인트": "powerpnt", "zoom": "zoom", "줌": "zoom", "obs": "obs64",
+    "vlc": "vlc", "photoshop": "photoshop", "포토샵": "photoshop", "edge browser": "msedge", "firefox": "firefox",
+    "파이어폭스": "firefox", "whale": "whale", "웨일": "whale", "terminal": "windowsterminal",
 }
 
 _INDEX = {"t": 0.0, "items": []}   # items: (display name, kind 'lnk'|'aumid', target)
@@ -180,6 +214,9 @@ def launch_app(app: str, **_) -> dict:
                 else:
                     subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{target}"])
                 return ok(f"Opening {disp}, sir.", {"app": disp, "kind": kind})
+            site = _website(key)
+            if site:
+                return _open_site(name, site)
             return fail(f"I couldn't find an app called {name} on this PC, sir.",
                         error=f"no Start Menu or Store app matched '{name}'")
         except Exception as e:
@@ -194,12 +231,35 @@ def launch_app(app: str, **_) -> dict:
             return fail(f"I couldn't open {name}, sir.", str(e))
     exe = shutil.which(key) or shutil.which(key.replace(" ", "-"))
     if not exe:
+        site = _website(key)
+        if site:
+            return _open_site(name, site)
         return fail(f"I can't find {name} on this system, sir.", error=f"executable not found: {name}")
     try:
         subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return ok(f"Opening {name}, sir.", {"app": name, "target": exe})
     except Exception as e:
         return fail(f"I couldn't open {name}, sir.", str(e))
+
+
+def _website(key: str) -> Optional[str]:
+    k = key.strip().lower()
+    k = re.sub(r"\s+(website|site|web ?page|page|dot com)$", "", k)
+    if k in WEBSITES:
+        return WEBSITES[k]
+    if _DOMAIN.match(k):
+        return "https://" + k
+    return None
+
+
+def _open_site(name: str, url: str) -> dict:
+    from .browser import open_url
+    r = open_url(url)
+    if r.get("ok"):
+        r = dict(r)
+        r["speak"] = f"Opening {name}, sir."
+        r["data"] = dict(r.get("data") or {}, url=url, speak_ko=f"{name}을(를) 엽니다, sir.")
+    return r
 
 
 def close_app(app: str, **_) -> dict:

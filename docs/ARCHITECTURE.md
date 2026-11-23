@@ -1,4 +1,4 @@
-# 아키텍처 (v1.4.3)
+# 아키텍처 (v1.4.4)
 
 ## 구성 요소
 ```
@@ -81,16 +81,22 @@ START_JARVIS.bat ─► boot/launcher.py
    그 외 → **LLM 스트리밍**: 토큰이 오는 대로 `transcript_delta`(초당 최대 25회), 문장이 완성될 때마다 `say`(긴 첫 문장은 첫 구절에서)
    — 곧바로 음성 큐에 들어가 발화.
    `<action>` 태그가 시작되면 발화를 멈추고, 끝까지 받은 뒤 태그의 도구를 실행.
+   **v1.4.4 — 도구 호출**: 모델이 도구 호출을 지원하면(Qwen 2.5 등) `agent/tools_spec.py`의 도구 정의를 `tools`로 함께 보내고,
+   스트림에서 받은 `tool_calls`를 `resolve_call()`(이름·인자 별칭, 실제 사용자 폴더)로 정리해 같은 권한 게이트로 실행합니다.
+   여러 단계 요청은 도구 결과를 돌려줘 다음 호출을 받습니다(최대 3회). 대화 기록에는 도구 호출과 결과를 그대로 남기고(태그 모드
+   모델에게는 `<action>` 줄로 변환), 빈 답은 도구 없이 다시 답하며, 동작을 말로만 설명한 답은 JSON 형식 요청(`chat_json`)으로 구제합니다.
+   지원하지 않는 모델(Ollama 400 "does not support tools")은 자동으로 태그 모드. 입력은 먼저 `normalize_command()`로 문장부호·공손한
+   표현·한국어 어미를 걷어낸 뒤 규칙과 대조하고, HUD가 알려 준 화면 상태(`ui_state`, 3D 공간)에 따라 `contextual_intent()`가 해석을 조정합니다.
 4. 최종 `transcript`(final) → 옵션·추천(요구 2-3, 2-4) → 체크포인트 → `state: idle`.
 5. 새 명령 또는 음성 바지인은 진행 중 작업을 취소(기록에는 "interrupted")하고 음성 큐를 비웁니다(요구 13).
 
 ## 커맨드 버스 메시지
 - **클라이언트 → 서버:** `command` · `wake` · `listen`(누르고 말하기) · `interrupt` · `feedback` · `permission_response` ·
-  `ui`(`ai_listen` 등) · `neural_points` · `space3d_save` · `space3d_load` · `space3d_export` · `get_settings` · `set_settings` ·
-  `get_history` · `ping`
+  `ui`(`ai_listen` 등) · `ui_state`(v1.4.4: 화면 상태, 예 `{space3d: true}`) · `neural_points` · `space3d_save` · `space3d_load` ·
+  `space3d_export` · `get_settings` · `set_settings` · `get_history` · `ping`
 - **서버 → 클라이언트:** `hello`(설정 + 상태 + 자기 모델 요약) · `status`(음성 엔진 준비 등 상태 변화) ·
   `state`(idle/listening/capture/thinking/speaking/muted) · `transcript` ·
-  `transcript_delta` · `say` · `stop_tts` · `wake_response` · `options` · `ui` · `permission_request` · `listen_unavailable` ·
+  `transcript_delta` · `say` · `stop_tts` · `wake_response` · `options` · `ui` · `permission_request` · `permission_resolved`(v1.4.4) · `timer_due`(v1.4.4) · `listen_unavailable` ·
   `neural_points` · `space3d_project` · `space3d_saved` · `space3d_exported` · `settings` · `settings_result` · `history` ·
   `control` · `error` · `pong`
 - `ui` 동작에 `announce`(배너 표시) 추가, `control`에 `self`(자기 모델 요약) 추가.

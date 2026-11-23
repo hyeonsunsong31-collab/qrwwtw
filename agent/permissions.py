@@ -31,6 +31,8 @@ class PermissionRequest:
     risk: float = 0.0
     force_ask: bool = False        # confirm this one request whatever the category says
     keywords: bool = True          # apply always_ask_keywords to the detail (off for shell commands)
+    question: str = ""             # what JARVIS asks, in plain words ("Shall I close Spotify, sir?")
+    lang: str = "en"
 
 
 class PermissionManager:
@@ -85,6 +87,7 @@ class PermissionManager:
             granted = bool(await self.asker({
                 "action": req.action, "category": req.category,
                 "detail": req.detail, "risk": req.risk or self.risk_of(req.category, req.detail),
+                "question": req.question, "lang": req.lang,
             }))
         except Exception:
             granted = False

@@ -1,6 +1,8 @@
 """System skills (requirement 20): info, volume, mic mute, power, battery."""
 from __future__ import annotations
 
+import re
+
 from .base import ok, fail, powershell, run, IS_WINDOWS, not_on_this_os
 
 
@@ -69,19 +71,88 @@ def _endpoint_volume(device):
 
 
 def set_volume(level=None, **_) -> dict:
-    try:
-        lvl = max(0, min(100, int(level)))
-    except (TypeError, ValueError):
-        return fail("What volume level, sir? Give me a number from 0 to 100.")
+    """level: 0-100, "+10" / "-10", "up" / "down" (10 points), "mute" / "unmute"."""
+    raw = str(level if level is not None else "").strip().lower().rstrip("%").replace("percent", "").strip()
+    rel, mute, lvl = None, None, None
+    if raw in ("up", "louder", "+", "increase", "raise", "올려", "키워"):
+        rel = 10
+    elif raw in ("down", "quieter", "softer", "-", "decrease", "lower", "내려", "줄여"):
+        rel = -10
+    elif raw in ("mute", "off", "silent", "silence", "음소거"):
+        mute = True
+    elif raw in ("unmute", "on"):
+        mute = False
+    elif re.fullmatch(r"[+-]\s*\d{1,3}", raw):
+        rel = int(raw.replace(" ", ""))
+    else:
+        try:
+            lvl = max(0, min(100, int(float(raw))))
+        except (TypeError, ValueError):
+            return fail("What volume level, sir? A number from 0 to 100, or up, down or mute.",
+                        f"unknown volume level {level!r}")
     if not IS_WINDOWS:
+        if mute is not None:
+            return ok(f"(Dev) Sound would be {'muted' if mute else 'unmuted'}, sir.", {"muted": mute,
+                      "speak_ko": f"(개발) 소리를 {'끕니다' if mute else '켭니다'}, sir."})
+        if rel is not None:
+            return ok(f"(Dev) Volume would go {'up' if rel > 0 else 'down'} by {abs(rel)}, sir.", {"change": rel})
         return ok(f"(Dev) Volume would be set to {lvl} percent, sir.", {"level": lvl})
     try:
         from pycaw.pycaw import AudioUtilities  # type: ignore
         with _com():
-            _endpoint_volume(AudioUtilities.GetSpeakers()).SetMasterVolumeLevelScalar(lvl / 100.0, None)
-        return ok(f"Volume set to {lvl} percent, sir.", {"level": lvl})
+            ev = _endpoint_volume(AudioUtilities.GetSpeakers())
+            if mute is not None:
+                ev.SetMute(1 if mute else 0, None)
+                return ok("Sound muted, sir." if mute else "Sound back on, sir.",
+                          {"muted": mute, "speak_ko": "소리를 껐습니다, sir." if mute else "소리를 다시 켰습니다, sir."})
+            if rel is not None:
+                cur = int(round(ev.GetMasterVolumeLevelScalar() * 100))
+                lvl = max(0, min(100, cur + rel))
+                if rel > 0:
+                    ev.SetMute(0, None)               # turning it up also unmutes
+            ev.SetMasterVolumeLevelScalar(lvl / 100.0, None)
+        return ok(f"Volume at {lvl} percent, sir.", {"level": lvl, "speak_ko": f"볼륨을 {lvl}퍼센트로 맞췄습니다, sir."})
     except Exception as e:
         return fail("I couldn't adjust the volume, sir.", str(e))
+
+
+_BRIGHT_GET = ("(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop | "
+               "Select-Object -First 1).CurrentBrightness")
+_BRIGHT_SET = ("Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop | "
+               "ForEach-Object {{ Invoke-CimMethod -InputObject $_ -MethodName WmiSetBrightness "
+               "-Arguments @{{Timeout=1; Brightness={0}}} | Out-Null }}; 'ok'")
+
+
+def set_brightness(level=None, **_) -> dict:
+    """level: 0-100, "+10" / "-10", "up" / "down". Built-in (laptop) screens; external monitors
+    keep their own buttons."""
+    raw = str(level if level is not None else "").strip().lower().rstrip("%").replace("percent", "").strip()
+    rel, lvl = None, None
+    if raw in ("up", "brighter", "+", "increase", "raise"):
+        rel = 15
+    elif raw in ("down", "dimmer", "darker", "-", "decrease", "lower", "dim"):
+        rel = -15
+    elif re.fullmatch(r"[+-]\s*\d{1,3}", raw):
+        rel = int(raw.replace(" ", ""))
+    else:
+        try:
+            lvl = max(0, min(100, int(float(raw))))
+        except (TypeError, ValueError):
+            return fail("What brightness, sir? A number from 0 to 100, or up or down.", f"unknown level {level!r}")
+    if not IS_WINDOWS:
+        return ok(f"(Dev) Brightness would be {'changed by ' + str(rel) if rel is not None else 'set to ' + str(lvl)}, sir.",
+                  {"level": lvl, "change": rel})
+    try:
+        if rel is not None:
+            cur = int(float(powershell(_BRIGHT_GET, timeout=15) or 50))
+            lvl = max(0, min(100, cur + rel))
+        out = powershell(_BRIGHT_SET.format(lvl), timeout=15)
+        if "ok" not in out:
+            raise RuntimeError(out[:200])
+        return ok(f"Brightness at {lvl} percent, sir.", {"level": lvl, "speak_ko": f"화면 밝기를 {lvl}퍼센트로 맞췄습니다, sir."})
+    except Exception as e:
+        return fail("This display doesn't let Windows change its brightness, sir; an external monitor uses its "
+                    "own buttons.", f"brightness: {e}")
 
 
 def _set_mic_mute(mute: bool) -> dict:

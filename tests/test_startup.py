@@ -120,7 +120,7 @@ def test_brain_moves_to_a_free_port_when_its_port_is_taken():
                 assert rt["port"] != taken and rt["pid"] > 0, rt
                 assert f"port {taken}" in (rt.get("port_note") or ""), rt
                 assert common.backend_port() == rt["port"], "clients follow the port the brain took"
-                assert common.backend_health()["version"] == "1.4.3"
+                assert common.backend_health()["version"] == "1.4.4"
                 assert phases[-1] == "listening", phases
                 assert "start-up: python + imports" in out and f"uses port {rt['port']}" in out, out[-800:]
                 assert set(rt["timings"]) >= {"starting", "neural-mesh", "agent", "listening"}, rt["timings"]

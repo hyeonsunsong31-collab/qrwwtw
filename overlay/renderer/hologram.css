@@ -243,3 +243,8 @@ body { font-family: var(--font); color: var(--cyan-soft);
 #state-ring[data-state="transcribing"] .ring-fg { animation: spin 1.1s linear infinite; }
 .toast.info { border-color: var(--cyan-dim); box-shadow: 0 0 16px var(--cyan-glow); }
 .toast .fix { font-size: 12px; opacity: .85; }
+
+/* v1.5.0: permission toasts ask in plain words and can be answered by voice or text */
+.toast .perm-q { margin: 4px 0 2px; font-size: 13px; }
+.toast .perm-detail { opacity: .72; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
+.toast .perm-hint { opacity: .6; font-size: 10.5px; margin: 4px 0 2px; }

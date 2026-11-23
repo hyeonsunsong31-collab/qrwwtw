@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, NamedTuple, Optional
 
-from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck, llmcheck, shell
+from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck, llmcheck, shell, clock
 
 
 class Skill(NamedTuple):
@@ -26,9 +26,22 @@ LLM_FORBIDDEN = {"shell_permission"}
 
 
 def _call(fn):
-    """Adapt fn(**kwargs) so the orchestrator can pass one args dict."""
+    """Adapt fn(**kwargs) so the orchestrator can pass one args dict. Arguments the function
+    does not take are dropped (a language model sometimes adds one), never an error."""
+    import inspect
+    try:
+        params = inspect.signature(fn).parameters
+        names = set(params)
+        takes_any = any(p.kind == p.VAR_KEYWORD for p in params.values())
+    except (TypeError, ValueError):
+        names, takes_any = set(), True
+
     def wrapper(args: dict):
-        return fn(**{k: v for k, v in (args or {}).items() if not k.startswith("_")})
+        clean = {k: v for k, v in (args or {}).items() if not str(k).startswith("_")}
+        if not takes_any:
+            clean = {k: v for k, v in clean.items() if k in names}
+        return fn(**clean)
+    wrapper.__wrapped__ = fn
     return wrapper
 
 
@@ -101,6 +114,13 @@ REGISTRY: Dict[str, Skill] = {
     "power":          Skill(_call(system.power), "change_system_settings", "settings"),
     "lock":           Skill(_call(system.lock_workstation), "change_system_settings", "chat"),
     "list_devices":   Skill(_call(devices.list_devices), "read_devices", "devices"),
+    "set_brightness": Skill(_call(system.set_brightness), "media_control", "chat"),
+
+    # ---- clock (v1.5.0): the time, timers and reminders ----
+    "time_now":       Skill(_call(clock.time_now), "read_system_info", "chat"),
+    "set_timer":      Skill(_call(clock.set_timer), "jarvis_data", "chat"),
+    "list_timers":    Skill(_call(clock.list_timers), "jarvis_data", "chat"),
+    "cancel_timer":   Skill(_call(clock.cancel_timer), "jarvis_data", "chat"),
 
     # ---- files ----
     "file_search":    Skill(_call(files.search_files), "read_files", "file_search"),
@@ -108,6 +128,9 @@ REGISTRY: Dict[str, Skill] = {
     "file_write":     Skill(_call(files.write_file), "write_files", "file_write"),
     "file_delete":    Skill(_call(files.delete_file), "delete_files", "file_write"),
     "list_dir":       Skill(_call(files.list_dir), "read_files", "file_search"),
+    "make_folder":    Skill(_call(files.make_folder), "write_files", "file_write"),
+    "open_folder":    Skill(_call(files.open_folder), "read_files", "chat"),
+    "empty_recycle_bin": Skill(_call(files.empty_recycle_bin), "delete_files", "file_write"),
 
     # ---- browser / web ----
     "open_url":       Skill(_call(browser.open_url), "browser_open", "browser"),

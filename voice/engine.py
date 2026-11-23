@@ -565,12 +565,13 @@ class VoiceEngine:
         return self._loop.run_in_executor(None, self.speaker.prepare, text, lang)
 
     # ----------------------------------------------------------- capture #
-    def begin_capture(self, after_speech: bool = True) -> bool:
+    def begin_capture(self, after_speech: bool = True, kind: Optional[str] = None) -> bool:
         """Listen for one command now, or right after current speech finishes. Returns False
-        (and reports why) when the microphone cannot hear anything."""
+        (and reports why) when the microphone cannot hear anything. kind="answer": the reply to
+        a question JARVIS asked (yes / no to a permission prompt), no wake phrase needed."""
         if not self.available or not self.listening:
             return False
-        kind = "wake" if after_speech else "ptt"
+        kind = kind or ("wake" if after_speech else "ptt")
         if self.blocking_problem() is not None:
             self._schedule(self._unheard("mic_problem", None, kind=kind))
             return False

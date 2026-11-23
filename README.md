@@ -75,8 +75,18 @@ Windows 10(1809+)/11, 마이크·스피커(헤드셋이면 더 좋음)·웹캠(�
 - **음성이 안 될 때:** HUD 위쪽 🎙 배지가 빨간색이면 눌러 보세요. **`check the microphone`** / **`마이크 확인해 줘`**라고 입력하면
   원인(Windows 마이크 개인 정보 설정, 음소거, 장치 없음 등)과 해결 방법을 알려 주고, JARVIS 버튼 아래 막대로 마이크 소리 크기가 보입니다.
   설정 패널의 **Microphone**에서 쓸 마이크를 고를 수 있습니다. → **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** "음성 웨이크·음성 명령이 안 될 때"
+- **명령은 실제로 실행됩니다 (v1.4.4).** 말한 그대로("Can you open Notepad?", "Jarvis, could you turn it up for me.")
+  알아듣고, 규칙에 없는 표현은 언어 모델이 **도구를 직접 호출**해 처리합니다("open Word and write a letter"처럼 여러 단계도).
+  허락이 필요한 동작은 "**Shall I close Spotify, sir?**"라고 **말로 묻고**, 호출어 없이 "**yes / 네**" 또는 "**no / 아니요**"로
+  답하면 됩니다(입력이나 버튼도 가능).
 - **명령은 음성·텍스트·버튼 모두 같은 길로 처리**됩니다. 예:
-  - "open the 3D project space" / "3D 공간 열어줘"
+  - "open the 3D project space" / "3D 공간 열어줘" · "**close the 3D space**" / "**3D 공간 닫아 줘**" (열려 있는 동안은
+    "close it" · "exit" · "닫아 줘"만으로도, 또는 **Esc** · 기능 독의 "3D 닫기")
+  - "what time is it" / "지금 몇 시야" · "**set a timer for 5 minutes**" · "**remind me to call mom in 10 minutes**" /
+    "5분 뒤에 알려 줘" · "what timers do I have" · "cancel the timer"
+  - "turn it up" · "it's too loud" · "mute" · "set brightness to 70" · "turn on bluetooth"(설정 페이지)
+  - "make a folder called Projects on my desktop" · "open my downloads" · "empty the recycle bin" ·
+    "shut down / restart the computer" · "lock the PC" / "컴퓨터 꺼 줘" · "copy that" · "paste it" · "save it" · "ping google.com"
   - "add a cube" · "clone the object" · "delete the object" · "save the project" · "export the model"
   - "show the neural network" / "신경망 보여줘" · "use it as my wallpaper" / "배경화면으로 사용해"
   - "play some lofi jazz" / "로파이 재즈 틀어줘" · "stop the music"
