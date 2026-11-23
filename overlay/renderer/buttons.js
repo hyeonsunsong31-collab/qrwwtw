@@ -60,6 +60,8 @@ export function initButtons(handlers) {
     hideDock: () => dock.classList.add("hidden"),
     rerenderLabels: () => renderDock(dock, handlers),
     setAiMuted: (on) => { aiMuted = !!on; muteAi.classList.toggle("muted", aiMuted); },
+    // the You button follows Windows' own microphone mute (it can outlive a JARVIS restart)
+    setUserMuted: (on) => { userMuted = !!on; muteUser.classList.toggle("muted", userMuted); },
     reactor,
   };
 }

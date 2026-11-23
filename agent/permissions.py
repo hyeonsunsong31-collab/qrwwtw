@@ -6,8 +6,10 @@ Permission gate for agentic PC control (requirement 20, see docs/SECURITY.md).
 Every skill action passes through `PermissionManager.check(...)`. The decision comes from
 config/permissions.json:  allow | ask | deny  per category, with hard overrides:
   * keywords in `always_ask_keywords` force 'ask' even inside an 'allow' category,
-  * `run_shell_elevated` and anything in `never_allowed` are refused,
+  * a skill can force 'ask' for one request (a shell command that could destroy data),
   * destructive/outbound actions default to 'ask'.
+v1.4.3: `run_shell_elevated` follows its setting like every other category (default 'deny';
+the user may choose 'ask' or 'allow' -- Windows' own UAC prompt still appears every time).
 'ask' calls an injected async `asker(request)` (the overlay shows a holographic confirm
 dialog). Every decision is written to the audit log by the recorder.
 """
@@ -27,6 +29,8 @@ class PermissionRequest:
     category: str
     detail: str = ""
     risk: float = 0.0
+    force_ask: bool = False        # confirm this one request whatever the category says
+    keywords: bool = True          # apply always_ask_keywords to the detail (off for shell commands)
 
 
 class PermissionManager:
@@ -59,13 +63,13 @@ class PermissionManager:
         policy = self.categories.get(req.category, self.default)
         detail_l = (req.detail or "").lower()
 
-        # hard refusals
-        if policy == "deny" or req.category == "run_shell_elevated":
+        # refusals
+        if policy == "deny":
             self._audit(req, "deny")
             return False
 
         # forced 'ask'
-        forced_ask = any(k in detail_l for k in self.always_ask)
+        forced_ask = req.force_ask or (req.keywords and any(k in detail_l for k in self.always_ask))
         effective = "ask" if (policy == "ask" or forced_ask) else policy
 
         if effective == "allow":

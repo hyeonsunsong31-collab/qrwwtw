@@ -1,11 +1,11 @@
 /* chat.js -- holographic chat box (requirements 3, 6, 13).
  * Text input plus a mic button. The mic asks the backend's Whisper engine to listen
- * (push-to-talk); only if the backend has no microphone does it fall back to the browser's
- * speech recognition. Streamed replies grow in place, so text appears as JARVIS speaks. */
+ * (push-to-talk). If the backend cannot listen, app.js shows why (v1.4.2: the browser's own
+ * speech recognition was the fallback, but inside Electron it needs Google keys and silently
+ * did nothing). Streamed replies grow in place, so text appears as JARVIS speaks. */
 import { bus } from "./bus.js";
-import { getLang } from "./i18n.js";
 
-let panel, transcript, input, optionsBar, listenBtn, recog, listening = false;
+let panel, transcript, input, optionsBar, listenBtn;
 const live = new Map();   // msg_id -> bubble element being streamed
 
 export function initChat() {
@@ -27,7 +27,7 @@ export function initChat() {
   document.getElementById("chat-close").addEventListener("click", hide);
   listenBtn.addEventListener("click", () => { listenBtn.classList.add("live"); bus.listen(); });
 
-  return { addMessage, stream, finalize, setOptions, show, hide, toggle, browserListen,
+  return { addMessage, stream, finalize, setOptions, show, hide, toggle,
            setListening: (on) => listenBtn.classList.toggle("live", !!on),
            focus: () => input && input.focus() };
 }
@@ -75,22 +75,6 @@ function chip(label, isSug) {
     else bus.command(label, "text");
   });
   return c;
-}
-
-/* Fallback only: the browser's recognizer (used when the backend has no microphone). */
-function browserListen() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  listenBtn.classList.remove("live");
-  if (!SR) { input.placeholder = "No microphone available to JARVIS - please type, sir."; return; }
-  if (!recog) {
-    recog = new SR();
-    recog.continuous = false; recog.interimResults = false;
-    recog.onresult = (ev) => { const t = ev.results[0][0].transcript.trim(); if (t) bus.command(t, "voice"); };
-    recog.onend = recog.onerror = () => { listening = false; listenBtn.classList.remove("live"); };
-  }
-  if (listening) { recog.stop(); return; }
-  try { recog.lang = getLang() === "ko" ? "ko-KR" : "en-GB"; recog.start(); listening = true;
-        listenBtn.classList.add("live"); } catch (e) {}
 }
 
 function show() { panel && panel.classList.remove("hidden"); }

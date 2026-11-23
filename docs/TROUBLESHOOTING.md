@@ -57,6 +57,8 @@ v1.3부터 `START_JARVIS.bat`은 **시작을 요청만 하지 않고, 실제로 
 | `..\install.log` | 설치 기록 |
 | `..\supervisor.json`, `..\overlay.json` | 현재 상태(START가 확인하는 파일) |
 | `..\runtime.json` | 두뇌가 실제로 쓰는 포트, 프로세스, 시작 단계와 단계별 시간 |
+| `mic_check.txt` | `TEST_MICROPHONE.bat`의 마지막 마이크 점검 보고서 |
+| `llm_check.txt` · `ollama.log` | `TEST_LANGUAGE_ENGINE.bat`의 보고서 · JARVIS가 시작한 Ollama의 출력 |
 
 ## 그 밖의 명령
 ```
@@ -65,8 +67,63 @@ START_JARVIS.bat --restart          전부 멈추고 새로 시작
 START_JARVIS.bat --status           상태만 확인
 START_JARVIS.bat --normal-graphics  소프트웨어 렌더링 해제
 STOP_JARVIS.bat                     지금 종료(로그온 자동 시작은 유지)
+TEST_MICROPHONE.bat                 안내형 마이크 점검(목록·Windows 설정·녹음·웨이크 인식)
+TEST_LANGUAGE_ENGINE.bat            안내형 언어 엔진 점검(프록시·포트·Ollama 시작·모델 다운로드·실제 질문)
 UNINSTALL_JARVIS.bat                자동 시작 제거 + 종료
 ```
+
+## 언어 엔진에 연결되지 않을 때 (v1.4.3)
+HUD 상단에 "language engine offline / not installed / problem"이 보이거나 답변이 짧은 대체 응답뿐이라면, v1.4.3부터 JARVIS가 스스로
+고치려고 하고 이유를 말합니다. 대체 응답 자체가 이유를 담고 있습니다("My apologies, sir: …"). 빠른 확인 방법:
+
+- HUD에 **`check the language engine`** (또는 **`언어 엔진 확인해 줘`**) — 꺼져 있으면 시작까지 시도한 뒤, 주소·버전·모델·속도와
+  문제·해결 방법을 알려 줍니다. `restart the language engine`으로 다시 시작할 수도 있습니다.
+- **`TEST_LANGUAGE_ENGINE.bat`** — 프록시·OLLAMA_HOST·포트를 점검하고, Ollama를 시작하고, 모델이 없으면 받고, 실제로 한 번 물어봅니다.
+  보고서: `data\logs\llm_check.txt`.
+
+| 알림 / START 창 | 뜻 | 할 일 |
+|---|---|---|
+| `My language engine (Ollama) isn't installed` | Ollama가 없음 | 알림의 **설치하기** 버튼이나 `install the language engine`(관리자 권한 불필요, 약 1GB), 또는 `INSTALL_JARVIS.bat` |
+| `... installed but won't start (...)` | Ollama가 실행되지 않음(괄호 안에 Ollama의 마지막 오류) | JARVIS가 계속 다시 시도합니다. PC를 다시 시작하면 대개 해결. 자세한 내용: `data\logs\ollama.log` |
+| `port 11434 is reserved by Windows / in use by ...; the language engine runs on port 11435` | 기본 포트를 쓸 수 없어 다른 포트로 옮김(정상 동작) | 할 일 없음. 포트가 다시 비면 기본 포트로 돌아갑니다 |
+| `A system proxy is set on this PC; JARVIS now connects ... past it` | VPN·보안 프로그램·회사망의 프록시(예전엔 이것 때문에 연결 실패) | 할 일 없음 |
+| `Downloading the language model ...: 42%` | 모델을 받는 중(그동안 설치된 다른 모델로 대화하거나 대체 응답) | 기다리면 됩니다. 끝나면 "언어 엔진이 준비되었습니다" |
+| `I couldn't download the language model ...` / `There isn't enough disk space ...` | 다운로드 실패 / 디스크 부족 | 인터넷 연결·디스크 공간 확인. 몇 분 뒤 자동 재시도 |
+| `... needs more memory than is free; switched to qwen2.5:3b` | 메모리 부족으로 더 작은 모델로 바꿈(설정에 저장) | 다른 프로그램을 닫거나 그대로 사용. 설정 > Language model에서 다시 바꿀 수 있음 |
+| `I can't reach the language engine at http://...` | `llm.host`를 다른 컴퓨터로 지정했는데 응답 없음 | 그 컴퓨터 확인, 또는 `config\jarvis.config.json`의 `llm.host`를 `http://127.0.0.1:11434`로 |
+
+## 셸 명령 (v1.4.3)
+- JARVIS는 PowerShell 명령을 실행할 수 있습니다: `run the command Get-Process`, `powershell: ipconfig /all`, `셸에서 ipconfig 실행해 줘`.
+  관리자 권한은 `run as administrator: …` / `관리자 권한으로 … 실행해 줘`(Windows UAC 창에서 직접 승인).
+- 기본값은 명령마다 확인(`ask`)입니다. 확인 없이 실행하게 하려면 **`allow shell commands`**(또는 `셸 실행 허용해 줘`)라고 하고 확인
+  창에서 허용하거나, 설정 패널 > 권한 > *Run shell commands*를 `allow`로. 관리자 명령은 *Run shell commands as administrator*
+  (기본: 거부). 되돌리기: `always ask before shell commands` / `block shell access`.
+- 포맷·재귀 삭제·레지스트리 삭제 같은 위험한 명령은 `allow`여도 항상 확인합니다. 모든 명령과 출력은 기록됩니다 → `docs/SECURITY.md`.
+
+## 음성 웨이크·음성 명령이 안 될 때 (v1.4.2)
+v1.4.2부터 JARVIS는 **왜 안 들리는지 스스로 말합니다**: START 창의 `Microphone` / `Wake phrase` 줄, HUD 위쪽의 🎙 배지
+(빨간색 = 문제, 누르면 점검), 화면 알림(**설정 열기** 버튼), 그리고 음성 안내. 가장 빠른 확인 방법은 다음 둘입니다.
+
+- HUD 채팅창에 **`check the microphone`** (또는 **`마이크 확인해 줘`**)라고 입력 — 열린 마이크, 소리 크기, Windows 개인 정보 설정,
+  음소거, 웨이크 인식기·Whisper 상태, 마지막으로 들은 말과 해결 방법을 알려 줍니다.
+- **`TEST_MICROPHONE.bat`** 더블클릭 — 마이크 목록과 Windows 설정을 보여 주고, "wake up Jarvis"라고 말하는 동안 녹음해 레벨과 인식
+  결과로 무엇을 고칠지 알려 줍니다(JARVIS가 실행 중이어도 됨). 보고서: `data\logs\mic_check.txt`.
+
+| 알림 / START 창 | 뜻 | 할 일 |
+|---|---|---|
+| `Windows is blocking desktop apps from using the microphone` | Windows 개인 정보 설정에서 데스크톱 앱의 마이크가 꺼져 있음(소리 대신 무음이 들어옴) | 설정 > 개인 정보 및 보안 > 마이크 → **마이크 액세스**와 **데스크톱 앱이 마이크에 액세스하도록 허용** 켜기. 알림의 **설정 열기** 버튼이나 `open microphone privacy settings`로 바로 열 수 있음. 켜는 즉시 다시 듣습니다 |
+| `Your microphone is muted in Windows` | 기본 녹음 장치가 음소거됨(HUD의 **You** 버튼도 음소거 표시) | `unmute the microphone` 입력, **You** 버튼, 또는 설정 > 시스템 > 소리 > 입력 |
+| `Your microphone sends nothing but silence` | 장치가 꺼져 있거나 다른(빈) 장치가 기본 입력으로 선택됨 | 설정 > 시스템 > 소리 > 입력에서 올바른 마이크·입력 볼륨 확인, 또는 JARVIS 설정 > **Microphone**에서 직접 선택 |
+| `I can't find a microphone` | Windows에 녹음 장치가 없음 | 마이크 연결 / 장치 관리자에서 사용 설정. 꽂으면 JARVIS가 스스로 찾습니다 |
+| `I can't open the microphone` | 다른 프로그램이 독점 중이거나 장치 오류 | 그 프로그램을 닫거나 JARVIS 설정 > Microphone에서 다른 장치 선택 |
+| `My wake-word listener isn't available` | Vosk 웨이크 모델이 없음 | JARVIS가 스스로 내려받습니다(인터넷 필요). 그동안 WAKE 버튼·Ctrl+Alt+J |
+| `Speech recognition is loading (downloading its model)` | 첫 실행에서 Whisper 모델을 받는 중 | 기다리면 됩니다. 그동안 말한 명령은 준비되면 처리 |
+| `My speech recognition isn't working` | Whisper를 불러올 수 없음(이유 표시: 인터넷, Visual C++ 런타임, 메모리) | 표시된 대로 조치 후 `INSTALL_JARVIS.bat` |
+| HUD 알림 `I heard "…Jarvis"` | 이름만 알아들음(억양·발음) | "**wake up Jarvis**" 전체를 말하거나 "**Jarvis**"를 두 번. 이름만으로 깨우려면 설정 > **Wake on 'Jarvis' alone** |
+| `I didn't hear anything` / `I didn't catch that` | 말이 너무 작거나 짧음 | 마이크 가까이에서, 조금 크게. 🎙 배지의 레벨 막대(JARVIS 버튼 아래)가 말할 때 움직이는지 확인 |
+
+깨어나긴 하는데 말을 끝까지 듣기 전에 끊으면 설정 > **Pause that ends a spoken command**를 늘리세요(기본 600ms).
+자세한 동작 원리는 `docs/WAKE_WORD.md`.
 
 ## 두뇌가 늦게 뜨거나 "still waiting for the brain"이 계속될 때 (v1.4.1)
 

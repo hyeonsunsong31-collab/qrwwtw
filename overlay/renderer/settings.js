@@ -52,9 +52,9 @@ function row(key, spec, value) {
   if (spec.type === "bool") {
     ctl = document.createElement("input"); ctl.type = "checkbox"; ctl.checked = !!value;
     ctl.addEventListener("change", () => send(key, ctl.checked));
-  } else if (spec.type === "choice") {
+  } else if (spec.type === "choice" || (spec.type === "str" && Array.isArray(spec.options) && spec.options.length)) {
     ctl = document.createElement("select");
-    spec.choices.forEach((c) => { const o = document.createElement("option"); o.value = c; o.textContent = c;
+    (spec.choices || spec.options).forEach((c) => { const o = document.createElement("option"); o.value = c; o.textContent = c;
       if (c === value) o.selected = true; ctl.appendChild(o); });
     ctl.addEventListener("change", () => send(key, ctl.value));
   } else if (spec.type === "float" || spec.type === "int") {

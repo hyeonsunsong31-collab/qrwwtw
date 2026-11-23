@@ -1,5 +1,5 @@
 {
-  "version": "1.4.1",
+  "version": "1.4.3",
   "identity": {
     "name": "JARVIS",
     "persona": "A refined British gentleman's valet in the spirit of a classic butler: courteous, witty, concise, unflappable. Addresses the user as 'sir' unless told otherwise.",
@@ -37,13 +37,16 @@
       "openwakeword_model": "models/wake_up_jarvis.onnx",
       "sensitivity": 0.6,
       "lenient": false,
-      "notes": "vosk = exact phrase via grammar recognition (default). openwakeword = neural detector (bundled 'hey jarvis' model, or a custom one). lenient = also wake on 'Jarvis' alone."
+      "auto_download": true,
+      "notes": "vosk = exact phrase via grammar recognition (default); near misses (an accent) are double-checked by Whisper. openwakeword = neural detector (bundled 'hey jarvis' model, or a custom one). lenient = also wake on 'Jarvis' alone. auto_download = fetch the Vosk model (checksum-verified) if it is missing."
     },
     "barge_in": {
       "mode": "keyword",
       "keywords": ["stop", "wait", "hold on", "jarvis"],
       "notes": "keyword (default): say 'stop', 'wait', 'hold on' or 'Jarvis' while I'm speaking to interrupt, which never self-triggers on speakers. vad: any speech interrupts (best with a headset). off: no voice interruption (typing or the mic button still interrupt)."
-    }
+    },
+    "input_device": "default",
+    "notes_input_device": "default = the Windows default recording device (JARVIS moves on to another microphone if it sends nothing). Or the name of a microphone, as listed in Settings > Microphone."
   },
   "llm": {
     "provider": "ollama",

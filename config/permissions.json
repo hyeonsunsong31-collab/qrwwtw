@@ -23,6 +23,7 @@
     "control_devices": "ask",
     "read_accounts": "ask",
     "network_send": "ask",
+    "install_software": "ask",
     "run_shell": "ask",
     "run_shell_elevated": "deny"
   },

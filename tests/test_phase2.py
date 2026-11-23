@@ -75,7 +75,7 @@ def test_settings_validate_apply_and_locks():
         c, p = _copy_configs(d)
         r = S.apply_settings({"language.default": "ko", "voice.tts.rate": 1.25,
                               "voice.barge_in.mode": "vad", "permissions.write_files": "allow",
-                              "permissions.run_shell_elevated": "allow",     # locked
+                              "permissions.run_shell_elevated": "maybe",     # not allow/ask/deny
                               "voice.tts.rate_bad": 1, "llm.temperature": 9,  # unknown / out of range
                               "llm.model": "rm -rf /"},                       # bad characters
                              c, p)
@@ -88,7 +88,9 @@ def test_settings_validate_apply_and_locks():
         assert perms["categories"]["write_files"] == "allow"
         assert perms["categories"]["run_shell_elevated"] == "deny"
         got = S.get_settings(c, p)
-        assert got["schema"]["permissions.run_shell_elevated"]["locked"] is True
+        # v1.4.3: the user may allow administrator commands (Windows' UAC still asks each time)
+        assert got["schema"]["permissions.run_shell_elevated"]["locked"] is False
+        assert S.apply_settings({"permissions.run_shell_elevated": "ask"}, c, p)["applied"]
 
 
 def test_korean_replies():

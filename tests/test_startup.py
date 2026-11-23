@@ -27,6 +27,8 @@ import tempfile
 import threading
 import time
 import types
+
+import numpy as np
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -118,7 +120,7 @@ def test_brain_moves_to_a_free_port_when_its_port_is_taken():
                 assert rt["port"] != taken and rt["pid"] > 0, rt
                 assert f"port {taken}" in (rt.get("port_note") or ""), rt
                 assert common.backend_port() == rt["port"], "clients follow the port the brain took"
-                assert common.backend_health()["version"] == "1.4.1"
+                assert common.backend_health()["version"] == "1.4.3"
                 assert phases[-1] == "listening", phases
                 assert "start-up: python + imports" in out and f"uses port {rt['port']}" in out, out[-800:]
                 assert set(rt["timings"]) >= {"starting", "neural-mesh", "agent", "listening"}, rt["timings"]
@@ -403,7 +405,8 @@ def test_wake_detection_runs_off_the_event_loop_and_skips_ahead():
         def close(self):
             pass
 
-    eng._sd = types.SimpleNamespace(RawInputStream=lambda **kw: Stream(**kw))
+    eng._sd = eng.mic.sd = types.SimpleNamespace(RawInputStream=lambda **kw: Stream(**kw))
+    noise = [(np.random.default_rng(i).standard_normal(320) * 30).astype(np.int16).tobytes() for i in range(8)]
     beats = []
 
     async def run():
@@ -417,8 +420,8 @@ def test_wake_detection_runs_off_the_event_loop_and_skips_ahead():
         hb = asyncio.ensure_future(heartbeat())
         while eng._stream is None:
             await asyncio.sleep(0.005)
-        for _ in range(400):                 # 8 s of audio delivered in ~0.4 s
-            eng._stream.callback(bytes(640), 320, None, None)
+        for i in range(400):                 # 8 s of audio delivered in ~0.4 s
+            eng._stream.callback(noise[i % 8], 320, None, None)
             await asyncio.sleep(0.001)
         await asyncio.sleep(1.0)
         eng._running = False
@@ -430,7 +433,7 @@ def test_wake_detection_runs_off_the_event_loop_and_skips_ahead():
     assert det.calls < 400 and det.resets >= 1, (det.calls, det.resets)       # skipped ahead
     assert det.threads == {next(iter(det.threads))} and all(t.startswith("jarvis-audio") for t in det.threads)
     assert max(gaps) < 0.25, f"the event loop stalled for {max(gaps):.2f}s"
-    assert MAX_BACKLOG_FRAMES == 50
+    assert MAX_BACKLOG_FRAMES == 150         # v1.4.2: frames are batched, so it falls behind less
 
 
 if __name__ == "__main__":

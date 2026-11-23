@@ -1,4 +1,4 @@
-# 아키텍처 (v1.4.1)
+# 아키텍처 (v1.4.3)
 
 ## 구성 요소
 ```
@@ -19,7 +19,7 @@
 └────────────────────────────────────────────────────────────────────────┘
  supervisor(boot/jarvis_service.py): 단일 인스턴스(뮤텍스) · 남은 프로세스 정리 · 백엔드/오버레이를
  직접 실행·재시작 · 출력은 data/logs/*.log · /health 감시 · 화면 표시부 런타임 자가 복구 ·
- 상태 파일 data/supervisor.json · Ollama 기동 · 주간 유지보수 — 로그온 예약작업이 실행
+ 상태 파일 data/supervisor.json · 주간 유지보수 — 로그온 예약작업이 실행 (Ollama는 v1.4.3부터 두뇌가 직접 관리)
  launcher(boot/launcher.py): START_JARVIS.bat이 실행 — 점검 → 시작 → **화면에 떴는지 확인** → 진단
 ```
 
@@ -60,6 +60,16 @@ START_JARVIS.bat ─► boot/launcher.py
 - **Ollama 캐시**: Ollama는 이미 읽은 프롬프트 접두부의 KV 캐시를 재사용합니다. 그래서 시스템 프롬프트에는 턴마다 바뀌는 것을 넣지 않고
   (자기 코어의 요청 횟수 제거, 스타일 지시는 새 메시지의 `[Host note]`로), 대화 기록은 보낸 그대로·생성된 그대로 보관하며(16개 또는
   6000자를 넘으면 한 번에 8개로), `num_ctx`는 항상 같은 값을 보냅니다(바뀌면 모델을 다시 올림). 모든 요청에 `keep_alive`.
+- **언어 엔진 관리 (v1.4.3)**: `agent/ollama_service.py`가 Ollama를 찾고(PATH·설치 폴더·레지스트리) 시작하며(트레이 앱 또는
+  `ollama serve`, 출력은 `data/logs/ollama.log`), 11434가 막혔거나 다른 프로그램이 쓰면 다음 빈 포트로 옮겨 기억하고, `OLLAMA_HOST`를
+  따릅니다. 로컬 엔진 요청은 **항상 프록시를 우회**합니다(`make_client`, `trust_env=False`) — 시스템 프록시가 127.0.0.1 요청까지 가로채
+  "오프라인"이 되던 원인. `ResilientLLM`은 상태(starting · offline · not_installed · installing · pulling · loading · ready · error)와
+  `problem`/`note`/`progress`를 유지합니다: 모델이 없으면 설치된 다른 모델로 대화하며 백그라운드로 받고(디스크 확인), 메모리가 부족하면
+  한 단계 작은 모델로 바꿔 설정에 저장하며, 연결 거부만 오프라인으로 봅니다. 서버는 진행 중에도 2초마다 상태를 HUD에 보내고, 지속되는
+  문제는 말로 알리며, 대체 응답(`MockLLM`)이 이유를 담습니다. 스킬 `llm_status`/`llm_install`, 점검 도구 `scripts/llm_check.py`.
+- **셸 (v1.4.3)**: `agent/skills/shell.py` — PowerShell을 `-EncodedCommand`로 실행(UTF-8 출력, 60초 제한), 관리자 명령은
+  `Start-Process -Verb RunAs`(UAC). 권한 확인 창에는 `preflight()`가 만든 명령 원문이 보이고, 위험 명령은 `force_ask`로 항상 확인.
+  출력은 `data["show"]`로 채팅창에만 표시(읽지 않음)되고 전체는 기록에 저장. `shell_permission`은 `LLM_FORBIDDEN` — 모델의 `<action>`으로는 실행 불가.
 - **예열**: 서버의 `keep_llm_warm` 작업이 Ollama가 뜨자마자 모델을 올리고 실제 시스템 프롬프트를 한 번 읽혀 두며, 생성 속도·GPU 비율을
   재서 `/status`(`llm_state`, `llm_tokens_per_s`, `llm_gpu`)로 알리고, Ollama가 재시작되면 다시 올립니다. 음성 엔진은 시작할 때 Whisper와
   VAD를 한 번 돌리고 자주 하는 말(웨이크 응답 등)을 미리 합성합니다. 앱 목록·yt-dlp·플레이어 위치도 백그라운드에서 준비합니다.
@@ -102,13 +112,27 @@ START_JARVIS.bat ─► boot/launcher.py
 
 ## 음성 (요구 3·7·8·12·13·21) — `voice/`
 ```
-IDLE ──"wake up jarvis"(Vosk 문법 / openWakeWord)──► on_wake → 응답을 말한 뒤 CAPTURE
-CAPTURE ──VAD로 말이 끝날 때까지 녹음──► Whisper ──► 명령
+IDLE ──"wake up jarvis"(Vosk 문법, 정확한 구문)──────────────► on_wake → 응답을 말한 뒤 CAPTURE
+   └─"wake/up/jarvis" 근접 · 조용할 때의 짧은 문구 ──► Whisper(마지막 3초) ──► wake_verdict ──► on_wake / 힌트
+CAPTURE ──8프레임 중 4프레임이 소음+6dB 이상의 말이면 시작(잔향 0.25초 무시, 0.3초 선행 보존)──► 0.6초 침묵에 끝
+TRANSCRIBE ──► Whisper(영어·한국어, 환청 제거) ──► 명령   (못 알아들으면 voice_unheard → "잘 알아듣지 못했습니다")
 SPEAKING ◄── 문장 큐(say) ── 바지인: keyword(자기 말 무시) | vad | off ──► 멈춤 → CAPTURE
 MUTED ── 마이크 스트림을 닫음(개인정보)
 ```
+**마이크 (v1.4.2, `voice/mic.py`):** 설정 장치 → 기본 입력 → 같은 장치의 MME·DirectSound·WASAPI → 다른 마이크 순, 형식은
+16kHz 모노 → 장치 고유 형식(모노·스테레오) → 48/44.1kHz. 열린 형식은 오디오 스레드에서 16kHz 모노 20ms 프레임으로 변환
+(안티에일리어싱 FIR + 분수 리샘플링). 루프백 장치는 제외. 소리를 안 보내는 장치는 다음 장치로, 3초 디지털 무음이면 Windows
+개인 정보 설정(`ConsentStore\microphone`)과 기본 녹음 장치 음소거(pycaw)를 읽어 `privacy` / `muted` / `silent` 문제로 보고,
+10초마다 다시 확인해 풀리면 스트림을 새로 엽니다. 장치가 없으면 PortAudio를 다시 스캔하며 기다립니다.
+**시작 순서:** VoiceEngine 생성(마이크·VAD) → 루프 시작 → `load_models()`가 백그라운드 스레드에서 웨이크 모델 → 영국 음성 →
+Whisper → 예열 순으로 불러오고, 각각 준비되는 즉시 쓰입니다. Vosk 모델이 없으면 체크섬 고정 다운로드로 복구(`voice/models.py`).
+**보고:** 엔진 → `on_event` → 서버: `mic`(레벨, 초당 5회) · `voice_problem`(문제·해결책·설정 페이지, 한/영) · `voice_hint`
+(근접 웨이크, 인식 준비 중) · `voice_unheard`(못 들은 이유) · `voice_status`. 서버는 HUD로 중계하고 문제를 말로 안내(문제별 10분
+간격), `/status`의 `voice_detail`에 전체 보고서를 싣습니다(START 창, HUD 배지, "check the microphone" 스킬이 사용).
+음성 루프는 프레임 단위 오류를 기록하고 계속 돌며, 그래도 끝나면 서버(`supervise_voice`)가 다시 시작합니다.
 TTS: Piper `en_GB-alan-medium` → Windows OneCore(WinRT: "George", 한국어 "Heami") → SAPI5.
-STT: NVIDIA GPU면 `large-v3-turbo`, CPU면 `small`(int8), "Jarvis" 핫워드.
+STT: 사용 가능한 NVIDIA GPU면 `large-v3-turbo`(별도 프로세스에서 한 번 시험 후), CPU면 `small`(int8), "Jarvis" 핫워드.
+모델은 `models/whisper` → 사용자 캐시 → `models/whisper`로 다운로드 순으로 찾습니다.
 
 ## 3D 공간 (요구 5·17·18) — `overlay/renderer/space3d/`
 Three.js. 드래그(마우스/핀치), 스케일(스크롤/양손), 복제·추가·삭제, 저장/불러오기(`data/space3d/project.json`),

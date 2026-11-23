@@ -342,7 +342,7 @@ if (Test-Path $VPy) {
     $env:PYTHONPATH = $Root
     & $VPy -c "from openwakeword import utils; utils.download_models(model_names=['hey_jarvis']); print('openWakeWord models ready')" | Out-Host
     Info "  preparing the speech recogniser (Whisper; first time only) ..."
-    & $VPy -c "from voice.stt import Transcriber; t = Transcriber(); print('Whisper', t.model_name, 'ready' if t.available else 'NOT available')" | Out-Host
+    & $VPy -c "from voice.stt import Transcriber; t = Transcriber(); print('Whisper', t.model_name, ('ready (' + t.source + ')') if t.available else 'NOT available: ' + t.error)" | Out-Host
 }
 
 foreach ($cap in @("Language.TextToSpeech~~~en-GB~0.0.1.0", "Language.TextToSpeech~~~ko-KR~0.0.1.0")) {
@@ -366,6 +366,19 @@ if (Test-Path $VPy) {
 # ---------------------------------------------------------------------------- 8
 Section 8 "Self-test"
 if (Test-Path $VPy) { & $VPy (Join-Path $Root "scripts\healthcheck.py") | Out-Host }
+if (Test-Path $VPy) {
+    # can JARVIS's own Python code reach the language engine? (a system proxy used to break
+    # this while PowerShell's own check passed); TEST_LANGUAGE_ENGINE.bat does the full check
+    Info "  checking the language engine from JARVIS's side ..."
+    & $VPy (Join-Path $Root "scripts\llm_check.py") --quick | Out-Host
+    if ($LASTEXITCODE -ne 0) { Warn "The language engine needs attention (see above). JARVIS keeps repairing it by itself; TEST_LANGUAGE_ENGINE.bat shows the details." }
+}
+if (Test-Path $VPy) {
+    # a quick look at the microphone (privacy switch, mute, a 2-second level); TEST_MICROPHONE.bat does the full check
+    Info "  checking the microphone ..."
+    & $VPy (Join-Path $Root "scripts\mic_check.py") --quick | Out-Host
+    if ($LASTEXITCODE -ne 0) { Warn "The microphone needs attention (see above). Typing works meanwhile; run TEST_MICROPHONE.bat after fixing it." }
+}
 
 # ---------------------------------------------------------------------------- 9
 Section 9 "Launch"

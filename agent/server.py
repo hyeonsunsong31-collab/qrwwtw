@@ -27,6 +27,19 @@ the supervisor read. Nothing on the event loop waits for the network or for mode
 and the heavy warm-ups (speech, then the language model) run one after another in the
 background so they do not fight over the CPU.
 
+LANGUAGE ENGINE (v1.4.3): the brain keeps Ollama working by itself -- it starts it (or moves
+it off a blocked port), downloads a missing model while using one that is installed, and
+steps down to a smaller model when memory is short (agent/llm_ollama.py, agent/ollama_service.py).
+/status reports llm_state / llm_problem / llm_note / llm_progress, the HUD and the launcher
+show them, and JARVIS says what is wrong and how to fix it when the engine cannot be used.
+
+VOICE (v1.4.2): the voice engine starts with the microphone and the wake word, and loads the
+British voice and Whisper in the background. What it hears -- the microphone level, problems
+(muted, blocked by Windows privacy, no device), near misses and commands it could not make
+out -- arrives through on_voice_event(): the HUD gets a level meter and toasts, and JARVIS
+says what is wrong and how to fix it instead of staying silent. /status carries the full
+voice report ("voice_detail"), which the launcher and "check the microphone" read too.
+
 NOTE: no `from __future__ import annotations` here -- FastAPI must see the real Request /
 WebSocket classes (imported inside create_app), not unresolvable annotation strings.
 """
@@ -40,6 +53,7 @@ import secrets
 import socket
 import sys
 import time
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -51,11 +65,12 @@ from core.control_layer import ControlLayer
 from core.brain_mesh import build_mesh
 from recorder import Recorder
 from . import settings as settings_mod
-from .orchestrator import Orchestrator
+from .orchestrator import Orchestrator, ACK
 from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM, keep_alive_value
+from .ollama_service import is_loopback
 
-VERSION = "1.4.1"
+VERSION = "1.4.3"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -192,6 +207,25 @@ def bind_port(host: str, preferred: int, tries: int = 20):
     raise OSError(f"no free port for the command bus near {preferred}: {last}")
 
 
+# what JARVIS says when a spoken command did not come through (English, Korean)
+VOICE_LINES = {
+    "nothing": ("I didn't hear anything, sir.", "아무 말씀도 듣지 못했습니다, sir."),
+    "unclear": ("Sorry, sir, I didn't catch that.", "죄송합니다, sir, 잘 알아듣지 못했습니다."),
+    "faint": ("Sorry, sir, I could barely hear you - please speak up, or check the microphone's input volume.",
+              "죄송합니다, sir, 말씀이 너무 작게 들립니다 - 조금 크게 말씀하시거나 마이크 입력 볼륨을 확인해 주세요."),
+    "stt_loading": ("One moment, sir - my speech recognition is still loading.",
+                    "잠시만요, sir - 음성 인식을 아직 불러오는 중입니다."),
+    "stt_unavailable": ("My speech recognition isn't available, sir, so please type your command for now.",
+                        "음성 인식을 사용할 수 없습니다, sir. 지금은 명령을 입력해 주세요."),
+}
+VOICE_STATE_TEXT = {
+    "loading": "my voice is still starting up - give it a few seconds",
+    "unavailable": "the audio libraries are missing - run INSTALL_JARVIS.bat",
+    "failed": "the voice engine failed to start - see data/logs/backend.log",
+    "off": "voice is turned off in Settings",
+}
+
+
 class ConnectionManager:
     def __init__(self):
         self.active: Set = set()
@@ -248,15 +282,24 @@ class JarvisServer:
                                 model=llm_cfg.get("model", "auto"),
                                 candidates=llm_cfg.get("model_candidates", {}),
                                 keep_alive=llm_cfg.get("keep_alive", "always"),
-                                num_ctx=int(llm_cfg.get("context_tokens", 4096)))
+                                num_ctx=int(llm_cfg.get("context_tokens", 4096)),
+                                data_dir=data_dir, on_model_change=self._remember_model,
+                                manage=bool(llm_cfg.get("manage_engine", True)))
         self.orch = Orchestrator(self.config, self.llm, recorder=self.recorder,
                                  control=self.control, permissions=self.permissions,
                                  emit=self._emit)
         self.token = write_session_token(os.path.join(data_dir, "session.token"))
+        from agent.skills import voicecheck, llmcheck, shell
+        voicecheck.set_provider(self.voice_report)       # "check the microphone" reads the live report
+        llmcheck.set_provider(self.llm)                  # "check the language engine" / "install ..."
+        shell.set_permission_writer(self.apply_permission)   # "allow shell commands" (user only)
         self._pending_perms: Dict[str, asyncio.Future] = {}
         self._current: Optional[asyncio.Task] = None
         self.voice = None  # set by attach_voice()
         self.voice_state = "off"          # off | loading | online | unavailable | failed
+        self.voice_error = ""
+        self._voice_task: Optional[asyncio.Task] = None
+        self._said_at: Dict[str, float] = {}     # spoken voice notices, rate-limited per kind
         self.started_at = time.time()
         self.startup = {"neural_mesh_s": round(t_mesh, 2), "init_s": round(time.time() - t0, 2)}
 
@@ -268,14 +311,59 @@ class JarvisServer:
                 "llm": self.llm.model_name(), "llm_online": self.llm.cached_online(),
                 "llm_state": self.llm.state, "llm_error": self.llm.error or None,
                 "llm_tokens_per_s": self.llm.stats.get("tokens_per_s"),
+                "llm_problem": self.llm.problem, "llm_note": self.llm.note or None,
+                "llm_progress": self.llm.progress, "llm_host": self.llm.service.base,
+                "llm_version": self.llm.service.version,
+                "llm_proxy_bypassed": bool(self.llm.service.proxy and is_loopback(self.llm.service.base)),
                 "llm_gpu": self.llm.stats.get("gpu"), "llm_load_seconds": self.llm.stats.get("load_seconds"),
                 "neural_settle_ms": getattr(self.mesh, "settle_ms", None),
                 "port": self.port, "startup": self.startup,
                 "voice": bool(self.voice), "voice_state": self.voice_state,
+                "voice_error": self.voice_error or None,
+                "voice_tts": bool(self.voice and self.voice.tts_ready()),
+                "voice_detail": self._voice_detail(),
                 "listening": bool(self.voice and self.voice.listening),
                 "neurons_active": int(self.mesh.N),
                 "neurons_nominal": int(self.mesh.scale.nominal_neurons),
                 "synapses_active": int(self.mesh.E)}
+
+    def _voice_detail(self) -> Optional[dict]:
+        if self.voice is None:
+            return None
+        err = None
+        for _ in range(3):           # read from another thread ("check the microphone"): retry a race
+            try:
+                return self.voice.status()
+            except Exception as e:
+                err = e
+                time.sleep(0.01)
+        return {"error": repr(err)[:200]}
+
+    def voice_report(self) -> dict:
+        """The full voice report for 'check the microphone', with the Windows settings read
+        fresh (privacy switch, mute, input level)."""
+        rep = {"engine": self.voice_state, "engine_error": self.voice_error or None}
+        if self.voice is None:
+            rep["reason"] = VOICE_STATE_TEXT.get(self.voice_state, self.voice_state)
+            return rep
+        rep.update(self._voice_detail() or {})
+        try:
+            from voice.mic import privacy_status, endpoint_status
+            rep.setdefault("mic", {})["privacy"] = privacy_status()
+            rep["mic"]["endpoint"] = endpoint_status()
+        except Exception:
+            pass
+        return rep
+
+    def input_device_choices(self):
+        try:
+            from voice.mic import device_choices
+            sd = getattr(self.voice, "_sd", None)
+            if sd is None:
+                import sounddevice as sd  # type: ignore
+            return device_choices(sd)
+        except Exception:
+            return ["default"]
 
     def client_config(self) -> dict:
         c = self.config
@@ -297,9 +385,145 @@ class JarvisServer:
     async def on_voice_state(self, state: str):
         await self.manager.broadcast({"type": "state", "state": state, "source": "voice"})
 
+    def apply_permission(self, category: str, level: str) -> dict:
+        """Change one permission category (the user said "allow shell commands" and confirmed)."""
+        result = settings_mod.apply_settings({f"permissions.{category}": level}, self.config_path,
+                                             self.permissions_path)
+        self.permissions.reload()
+        self.recorder.audit("permission_change", category, level,
+                            detail={"applied": result["applied"], "rejected": result["rejected"]})
+        return result
+
+    def _remember_model(self, model: str):
+        """The language engine stepped down to a smaller model (memory): keep that choice."""
+        try:
+            settings_mod.apply_settings({"llm.model": model}, self.config_path, self.permissions_path)
+            self.config.setdefault("llm", {})["model"] = model
+            print(f"[jarvis] language model set to {model} (it fits this PC's memory)", flush=True)
+        except Exception as e:
+            print(f"[jarvis] could not save the language model choice: {e!r}", flush=True)
+
+    async def on_llm_change(self, prev_state: str, prev_code: Optional[str]):
+        """Say what keeps the language engine from working (once per problem per 10 minutes),
+        and that it works again after it had a problem."""
+        p = self.llm.problem or {}
+        code = p.get("code")
+        lasting = {"not_installed", "start_failed", "remote_down", "install_failed", "pull_failed",
+                   "no_space", "memory", "load_failed"}
+        lang = self.voice_lang()
+        if code in lasting and code != prev_code and self._due("llm:" + code, 600):
+            text = f"{p.get('message_ko')} {p.get('fix_ko')}" if lang == "ko" else f"{p.get('message')} {p.get('fix')}"
+            try:
+                self.recorder.log_explanation("error", f"language engine: {p.get('message')} {p.get('fix')}")
+            except Exception:
+                pass
+            await self.notify(text.strip(), lang)
+        elif self.llm.state == "ready" and prev_state != "ready" and self._said_at.get("llm_problem_spoken"):
+            self._said_at.pop("llm_problem_spoken", None)
+            await self.notify("My language engine is ready, sir." if lang != "ko" else "언어 엔진이 준비되었습니다, sir.", lang)
+        if code in lasting:
+            self._said_at["llm_problem_spoken"] = time.time()
+
     def attach_voice(self, engine):
         self.voice = engine
         self.voice_state = "online"
+
+    def voice_lang(self) -> str:
+        return getattr(self.orch, "last_lang", None) or self.orch.default_lang or "en"
+
+    def _due(self, key: str, every: float) -> bool:
+        now = time.time()
+        if now - self._said_at.get(key, 0.0) < every:
+            return False
+        self._said_at[key] = now
+        return True
+
+    async def _say_line(self, key: str, every: float = 0.0):
+        if every and not self._due("line:" + key, every):
+            return
+        en, ko = VOICE_LINES[key]
+        lang = self.voice_lang()
+        await self.notify(ko if lang == "ko" else en, lang)
+
+    async def _say_problem(self, p: dict, every: float = 600.0):
+        """Say what keeps JARVIS from hearing, and the fix (once per problem per 10 minutes)."""
+        if not p or not self._due("problem:" + str(p.get("code")), every):
+            return
+        lang = self.voice_lang()
+        text = (f"{p.get('message_ko')} {p.get('fix_ko')}" if lang == "ko"
+                else f"{p.get('message')} {p.get('fix')}")
+        await self.notify(text.strip(), lang)
+
+    async def on_voice_event(self, ev: dict):
+        """What the voice engine noticed -> the HUD (meter, toasts) and spoken explanations."""
+        t = ev.get("type")
+        if t == "mic":
+            if self.manager.active:
+                await self.manager.broadcast(ev)
+            return
+        if t == "voice_status":
+            await self.manager.broadcast({"type": "status", "status": self.status()})
+            return
+        if t == "voice_problem":
+            p = ev.get("problem") or {}
+            await self.manager.broadcast(ev)
+            await self.manager.broadcast({"type": "status", "status": self.status()})
+            if ev.get("active"):
+                try:
+                    self.recorder.log_explanation("error", f"voice: {p.get('message')} {p.get('fix')}")
+                except Exception:
+                    pass
+                if p.get("blocking"):
+                    await self._say_problem(p)
+            return
+        if t == "voice_hint":
+            await self.manager.broadcast(ev)
+            if ev.get("code") == "stt_loading":
+                await self._say_line("stt_loading", every=20)
+            return
+        if t == "voice_unheard":
+            await self._voice_unheard(ev)
+
+    async def _voice_unheard(self, ev: dict):
+        reason, kind = ev.get("reason"), ev.get("kind")
+        await self.manager.broadcast({**ev, "type": "voice_hint", "code": "unheard"})   # the HUD's toast
+        if reason == "mic_problem":
+            p = self.voice.blocking_problem() if self.voice is not None else None
+            await self._say_problem(p, every=20)
+        elif reason == "stt_unavailable":
+            await self._say_line("stt_unavailable", every=60)
+        elif reason == "no_speech":
+            if (ev.get("voiced_frames") or 0) >= 3:
+                await self._say_line("faint")
+            elif kind == "ptt":
+                await self._say_line("nothing")
+            # after the wake reply, silence just means "never mind": JARVIS stands by quietly
+        elif reason in ("too_short", "empty"):
+            await self._say_line("unclear")
+
+    async def supervise_voice(self, engine):
+        """Run the voice loop, and start it again if it ever stops by accident."""
+        crashes = []
+        while True:
+            try:
+                await engine.run()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.voice_error = f"voice loop stopped: {e!r}"[:300]
+                print(f"[jarvis] {self.voice_error}\n{traceback.format_exc()}", flush=True)
+            if getattr(engine, "stopped", False) or self.voice is not engine:
+                return
+            now = time.time()
+            crashes = [c for c in crashes if now - c < 600] + [now]
+            if len(crashes) > 5:
+                self.voice_state = "failed"
+                self.voice_error = self.voice_error or "the voice loop keeps stopping"
+                print("[jarvis] voice loop stopped 6 times in 10 minutes; giving up (typing still works)", flush=True)
+                await self.manager.broadcast({"type": "status", "status": self.status()})
+                return
+            print("[jarvis] voice loop ended unexpectedly; restarting it", flush=True)
+            await asyncio.sleep(2.0)
 
     async def announce(self, reason: str = "launcher") -> int:
         """Ask every connected overlay to show its 'JARVIS online' banner. Returns how many."""
@@ -350,14 +574,17 @@ class JarvisServer:
         """Voice wake word, WAKE button and Ctrl+Alt+J all land here (requirements 7-9)."""
         await self.orch.handle_wake()
         if self.voice is not None:
-            # listen for the command right after "Jarvis at your service sir" is spoken
+            # listen for the command right after "Jarvis at your service sir" is spoken; if the
+            # microphone cannot hear anything, the engine reports why and JARVIS says so
             self.voice.begin_capture(after_speech=True)
 
     async def listen(self, ws=None):
         """Push-to-talk from the overlay mic button: capture one command with Whisper."""
         if self.voice is None:
             if ws is not None:
-                await self.manager.send(ws, {"type": "listen_unavailable"})
+                await self.manager.send(ws, {"type": "listen_unavailable", "state": self.voice_state,
+                                             "reason": self.voice_error or VOICE_STATE_TEXT.get(
+                                                 self.voice_state, self.voice_state)})
             return
         await self.interrupt(stop_speech=True)
         self.voice.begin_capture(after_speech=False)
@@ -409,7 +636,8 @@ class JarvisServer:
 
     # ---------------------------------------------------------- settings #
     def get_settings(self) -> dict:
-        return settings_mod.get_settings(self.config_path, self.permissions_path)
+        return settings_mod.get_settings(self.config_path, self.permissions_path,
+                                         options={"voice.input_device": self.input_device_choices()})
 
     async def set_settings(self, changes: dict, ws=None):
         result = settings_mod.apply_settings(changes, self.config_path, self.permissions_path)
@@ -474,6 +702,13 @@ class JarvisServer:
             except Exception:
                 recs = []
             await self.manager.send(ws, {"type": "history", "key": key, "records": recs})
+        elif t == "open_settings_page":
+            # the HUD's "Open settings" button on a microphone problem: only these two pages
+            page = msg.get("page")
+            if page in ("privacy-microphone", "sound"):
+                from agent.skills import system as system_skill
+                await asyncio.to_thread(system_skill.open_settings, page)
+                self.recorder.log_command(f"[ui] open Windows settings: {page}", source="ui")
         elif t == "ping":
             await self.manager.send(ws, {"type": "pong"})
 
@@ -490,42 +725,47 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
     voice_done = asyncio.Event()      # the language-model warm-up waits for this (one at a time)
 
     async def start_voice_engine():
-        """Load the speech models off the event loop. They can take from seconds to minutes
-        (first run, slow disk), and the command bus must not wait for them: the overlay
-        connects -- and typed commands work -- as soon as the server is up."""
+        """Start the voice off the event loop: the microphone and the wake word come up in a
+        second or two; the British voice and Whisper load afterwards in the background (from
+        seconds to minutes on a first run), and the command bus never waits for any of it."""
         srv.voice_state = "loading"
         try:
             def make():
                 from voice.engine import VoiceEngine          # imported here, off the event loop
-                from agent.orchestrator import ACK
-                engine = VoiceEngine(srv.config, on_wake=srv.wake,
-                                     on_command=lambda text: srv.submit_command(text, source="voice"),
-                                     on_interrupt=lambda: srv.interrupt(stop_speech=True),
-                                     on_state=srv.on_voice_state, root=ROOT)
-                if engine.available:
-                    # warm the models up and pre-synthesise what JARVIS says most, so the wake
-                    # reply and the first command are as fast as every later one
-                    wake = srv.config.get("identity", {}).get("wake_response", "Jarvis at your service sir")
-                    t0 = time.time()
-                    done = engine.warm_up([(wake, "en"), (ACK["en"], "en"), ("Very good, sir.", "en"),
-                                           (ACK["ko"], "ko")])
-                    print(f"[jarvis] voice warm-up: speech recogniser {'ready' if done['stt'] else 'not warmed'}, "
-                          f"{done['phrases']} phrase(s) pre-synthesised ({time.time() - t0:.1f}s)", flush=True)
-                return engine
+                return VoiceEngine(srv.config, on_wake=srv.wake,
+                                   on_command=lambda text: srv.submit_command(text, source="voice"),
+                                   on_interrupt=lambda: srv.interrupt(stop_speech=True),
+                                   on_state=srv.on_voice_state, on_event=srv.on_voice_event, root=ROOT)
 
             ve = await asyncio.to_thread(make)
-            if ve.available:
-                srv.attach_voice(ve)
-                asyncio.create_task(ve.run())
-                print("[jarvis] voice engine online (wake word + STT + British TTS)", flush=True)
-            else:
+            if not ve.available:
                 srv.voice_state = "unavailable"
-                print("[jarvis] voice engine offline (audio libraries missing) - text still works", flush=True)
+                srv.voice_error = ve.unavailable_reason
+                print(f"[jarvis] voice engine offline ({ve.unavailable_reason}) - text still works", flush=True)
+                return
+            srv.attach_voice(ve)
+            srv._voice_task = asyncio.create_task(srv.supervise_voice(ve))
+            print("[jarvis] voice engine started: microphone and wake word now, speech models loading", flush=True)
+            await srv.manager.broadcast({"type": "status", "status": srv.status()})
+            # warm the models up and pre-synthesise what JARVIS says most, so the wake reply
+            # and the first command are as fast as every later one
+            wake = srv.config.get("identity", {}).get("wake_response", "Jarvis at your service sir")
+            t0 = time.time()
+            done = await asyncio.to_thread(ve.load_models, [(wake, "en"), (ACK["en"], "en"),
+                                                            ("Very good, sir.", "en"), (ACK["ko"], "ko")])
+            st = ve.status()
+            print(f"[jarvis] voice ready in {time.time() - t0:.1f}s: wake word "
+                  f"{st['wake'].get('engine') or 'UNAVAILABLE'}, voice {st['tts'].get('backend') or st['tts'].get('state')}, "
+                  f"speech recogniser {st['stt'].get('model')} {st['stt'].get('state')}"
+                  f"{' (' + str(st['stt'].get('error')) + ')' if st['stt'].get('error') else ''}, "
+                  f"{done.get('phrases', 0)} phrase(s) pre-synthesised; microphone "
+                  f"{st['mic'].get('device') or 'not open: ' + str(st['mic'].get('reason'))}", flush=True)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             srv.voice_state = "failed"
-            print(f"[jarvis] voice engine not started: {e!r}", flush=True)
+            srv.voice_error = repr(e)[:300]
+            print(f"[jarvis] voice engine not started: {e!r}\n{traceback.format_exc()}", flush=True)
         finally:
             voice_done.set()
         await srv.manager.broadcast({"type": "status", "status": srv.status()})
@@ -550,21 +790,35 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
         while True:
             try:
                 system = srv.orch.system_prompt(srv.orch.default_lang)
-                changed = await asyncio.to_thread(srv.llm.ensure_warm, system)
+                prev_state, prev_code = srv.llm.state, (srv.llm.problem or {}).get("code")
+                job = asyncio.ensure_future(asyncio.to_thread(srv.llm.ensure_warm, system))
+                seen = None
+                while not job.done():               # starting Ollama / downloading: keep the HUD posted
+                    await asyncio.wait([job], timeout=2.0)
+                    sig = (srv.llm.state, (srv.llm.problem or {}).get("code"),
+                           int((srv.llm.progress or {}).get("percent") or 0))
+                    if sig != seen and not job.done():
+                        seen = sig
+                        await srv.manager.broadcast({"type": "status", "status": srv.status()})
+                changed = job.result()
                 if srv.llm.state == "ready" and srv.llm.stats.get("warmed_at") and last != "ready":
                     st = srv.llm.stats
                     print(f"[jarvis] language model {st.get('model')} ready: loaded in {st.get('load_seconds')} s, "
                           f"{st.get('tokens_per_s')} tokens/s, {int(100 * (st.get('gpu') or 0))}% on the GPU", flush=True)
-                elif srv.llm.state == "error" and last != "error":
-                    print(f"[jarvis] language model could not be loaded: {srv.llm.error}", flush=True)
+                elif srv.llm.state != last and srv.llm.state in ("error", "not_installed", "offline", "pulling"):
+                    p = srv.llm.problem or {}
+                    print(f"[jarvis] language engine {srv.llm.state}: {p.get('message') or srv.llm.error or ''} "
+                          f"{p.get('fix') or ''}".rstrip(), flush=True)
                 if changed or srv.llm.state != last:
                     last = srv.llm.state
                     await srv.manager.broadcast({"type": "status", "status": srv.status()})
+                    await srv.on_llm_change(prev_state, prev_code)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 print(f"[jarvis] warm-up check failed: {e!r}", flush=True)
-            await asyncio.sleep(60 if srv.llm.state == "ready" else 5)
+            busy = srv.llm.state in ("pulling", "installing", "starting") or srv.llm.progress
+            await asyncio.sleep(2 if busy else 60 if srv.llm.state == "ready" else 5)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -578,11 +832,11 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
             srv.runtime.phase("listening")
         print(f"[jarvis] ready ({time.time() - srv.started_at:.1f}s)", flush=True)
         yield
-        for task in (voice_task, warm_task):
-            if task is not None and not task.done():
-                task.cancel()
         if srv.voice is not None:
             srv.voice.stop()
+        for task in (voice_task, warm_task, srv._voice_task):
+            if task is not None and not task.done():
+                task.cancel()
         if srv.runtime is not None:
             srv.runtime.phase("stopped")
 

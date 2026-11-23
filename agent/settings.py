@@ -5,8 +5,8 @@ Validated, hot-applied settings for the holographic Settings panel (requirement 
 options for continuous adjustment).
 
 Only keys listed in SCHEMA (plus permission categories) can be changed from the UI, and
-every value is type/range checked before it is written. `run_shell_elevated` stays locked
-to "deny". Files are written atomically so a crash mid-save can't corrupt the config.
+every value is type/range checked before it is written. (v1.4.3: `run_shell_elevated` is no
+longer locked -- the user may allow administrator commands; Windows' UAC still asks each time.) Files are written atomically so a crash mid-save can't corrupt the config.
 """
 from __future__ import annotations
 
@@ -46,10 +46,18 @@ SCHEMA: Dict[str, dict] = {
                                   "label": "Pause that ends a spoken command (ms)"},
     "llm.context_tokens":        {"type": "int", "min": 2048, "max": 32768, "step": 1024,
                                   "label": "Language model context (tokens)", "restart": True},
+    # the drop-down's options are the microphones connected right now (see get_settings)
+    "voice.input_device":        {"type": "str", "pattern": r"^[^\x00-\x1f]{1,160}$",
+                                  "label": "Microphone", "options": ["default"]},
 }
 
 PERMISSION_CHOICES = ["allow", "ask", "deny"]
-LOCKED_PERMISSIONS = {"run_shell_elevated"}
+LOCKED_PERMISSIONS: set = set()
+PERMISSION_LABELS = {
+    "run_shell": "Run shell commands (PowerShell)",
+    "run_shell_elevated": "Run shell commands as administrator (Windows asks each time)",
+    "install_software": "Install software (e.g. the language engine)",
+}
 
 
 def _get(d: dict, dotted: str, default: Any = None) -> Any:
@@ -131,15 +139,23 @@ def validate(key: str, value: Any) -> Any:
     raise ValueError("unsupported setting type")
 
 
-def get_settings(config_path: str, permissions_path: str) -> dict:
+def get_settings(config_path: str, permissions_path: str, options: Dict[str, List[str]] = None) -> dict:
+    """The editable settings. `options` fills drop-downs whose choices are only known at run
+    time (the microphones connected right now)."""
     cfg = _read(config_path)
     perms = _read(permissions_path)
     schema = copy.deepcopy(SCHEMA)
     values = {k: _get(cfg, k) for k in SCHEMA}
+    for key, opts in (options or {}).items():
+        if key in schema and opts:
+            current = values.get(key)
+            schema[key]["options"] = list(opts) + ([current] if current and current not in opts else [])
+    if values.get("voice.input_device") in (None, ""):
+        values["voice.input_device"] = "default"
     for cat, val in perms.get("categories", {}).items():
         key = f"permissions.{cat}"
         schema[key] = {"type": "choice", "choices": PERMISSION_CHOICES,
-                       "label": cat.replace("_", " "), "group": "permissions",
+                       "label": PERMISSION_LABELS.get(cat, cat.replace("_", " ")), "group": "permissions",
                        "locked": cat in LOCKED_PERMISSIONS}
         values[key] = val
     return {"schema": schema, "values": values}
