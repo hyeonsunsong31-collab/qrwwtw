@@ -390,6 +390,23 @@ def test_a_malformed_examiner_check_is_rewritten_not_blamed_on_the_program():
         rig.close()
 
 
+def test_a_criterion_that_misstates_the_start_is_corrected_with_its_check():
+    """A 3B planner wrote "The page should display a number starting at 5." for a counter that starts at
+    0; the vote corrects the check, and the criterion's words follow it."""
+    plan = dict(COUNTER_PLAN, criteria=["The page should display a number starting at 5."])
+    checks = [{"criterion": 1, "steps": [{"action": "expect_text", "target": "body", "value": "5"}]}]
+    llm = FakeLLM(plan, checks, [COUNTER_REPLY], review=ALL_MET, predict=_counter_mind())
+    rig = Rig(llm, "Make a web page with a counter starting at 0, a + button and a - button")
+    try:
+        assert rig.run()["status"] == "done", rig.logs[-6:]
+        c = rig.request["checklist"][0]
+        assert c["text"] == "The page should display a number starting at 0." and c["checks"][0]["steps"] == [
+            {"expect_text": "0"}], c
+        assert "settled_start" not in c["checks"][0]
+    finally:
+        rig.close()
+
+
 def test_an_audit_cannot_overrule_numbers_the_vote_confirmed():
     """The program stops "-" at 0; the confirmed check expects -1. The auditor (a weak model) would call
     the check wrong -- it is never asked: the coder is told the program is wrong, and fixes it."""
@@ -553,6 +570,67 @@ def test_short_labels_are_matched_exactly_and_stacked_changes_see_the_whole_prod
         rig.close()
 
 
+def test_cli_checks_get_their_arguments_and_unrequested_criteria_are_left_out():
+    """Measured on "a temperature converter: 100 --to f prints 212 ...": the 3B examiner wrote every
+    check with empty arguments, and the planner added five criteria nobody asked for."""
+    from dev.examiner import fill_cli_args, _examples
+    from dev.agent import _vague
+    req = ("Make a command-line temperature converter: given a number and --to f it converts Celsius to Fahrenheit "
+           "(100 --to f prints 212), and with --to c it converts Fahrenheit to Celsius (212 --to c prints 100).")
+    made = {1: [{"type": "cli", "args": "", "stdin": "", "expect": ["212"]}],
+            2: [{"type": "cli", "args": "", "stdin": "", "expect": ["100.0"]}],
+            3: [{"type": "cli", "args": "0 --to f", "stdin": "", "expect": ["32"]}]}
+    assert len(fill_cli_args(req, made)) == 2
+    assert [made[i][0]["args"] for i in (1, 2, 3)] == ["100 --to f", "212 --to c", "0 --to f"], made
+    assert _examples("`calc 3 + 4` gives 7 and 10 / 4 should print 2.5") == [("3 + 4", "7"), ("10 / 4", "2.5")]
+    assert _examples("running it with 5 outputs 25") == [("5", "25")]
+    unasked = ["The program handles invalid input gracefully.", "The program provides usage instructions when run "
+               "without arguments.", "The program exits cleanly.", "The program is tested with a variety of inputs.",
+               "The program is documented with comments.", "The page should be responsive and accessible."]
+    assert all(_vague(c, req) for c in unasked), [c for c in unasked if not _vague(c, req)]
+    assert not _vague("Given a number and --to f, it converts Celsius to Fahrenheit and prints the result.", req)
+    assert not _vague("It shows an error when the email is invalid", "a contact form that shows an error for an invalid email")
+    # end to end: the plan keeps only what was asked; the checks run with the request's arguments
+    plan = dict(CONV_PLAN, criteria=["`100 --to f` prints 212", "The program is documented with comments."])
+    llm = FakeLLM(plan, [{"criterion": 1, "args": "", "expect": ["212"]}], [CONV_GOOD], review=ALL_MET)
+    rig = Rig(llm, req)
+    try:
+        assert rig.run()["status"] == "done", rig.logs[-6:]
+        crit = rig.request["checklist"]
+        assert [c["text"] for c in crit] == ["`100 --to f` prints 212"], crit
+        assert crit[0]["checks"][0]["args"] == "100 --to f"
+        assert rig.logged("plan", "left out qualities you did not ask for")
+    finally:
+        rig.close()
+
+
+def test_a_wrong_command_line_check_is_audited_and_an_example_backed_one_is_not():
+    """The examiner expects "-40 --to f" to print -100 (wrong: -40); the program is right. After three
+    identical failures the audit rewrites that check. The check taken from the request's own example
+    ("100 --to f prints 212") is confirmed and never put before the auditor."""
+    req = "Make a command-line temperature converter: 100 --to f prints 212"
+    plan = dict(CONV_PLAN, criteria=["`100 --to f` prints 212", "`-40 --to f` prints -40"])
+    checks = [{"criterion": 1, "args": "100 --to f", "expect": ["212"]},
+              {"criterion": 2, "args": "-40 --to f", "expect": ["-100"]}]
+    audits = []
+
+    def audit(user):
+        audits.append(user)
+        return {"verdict": "check_wrong", "reason": "-40 C is -40 F", "args": "-40 --to f", "expect": ["-40"]}
+
+    llm = FakeLLM(plan, checks, [CONV_GOOD], review=ALL_MET, audit=audit)
+    rig = Rig(llm, req)
+    try:
+        res = rig.run()
+        assert res["status"] == "done", (res, rig.logs[-8:])
+        assert len(audits) == 1 and "-40 --to f" in audits[0], audits
+        crit = rig.request["checklist"]
+        assert crit[0]["checks"][0].get("confirmed"), "the request's own example"
+        assert crit[1]["checks"][0]["expect"] == ["-40"] and crit[1]["checks"][0]["by"] == "jarvis", crit[1]
+    finally:
+        rig.close()
+
+
 def test_the_examiner_works_numbers_out_one_action_at_a_time():
     from dev.examiner import Examiner
     req = "Make a web page with a counter: it shows a number starting at 0, a + button adds one, a - button subtracts one."
@@ -572,6 +650,9 @@ def test_the_examiner_works_numbers_out_one_action_at_a_time():
     assert all(k[0].get("confirmed") for k in m.values()), "every number was worked out: the vote vouches for them"
     asked = [u for k, _s, u in llm.calls if k == "predict"]
     assert len(asked) == len(set(asked)), "the same question is not asked twice"
+    start = {1: [{"type": "web", "steps": [{"expect_text": "5"}]}]}
+    Examiner(FakeLLM({}, [], [""], predict=_counter_mind())).settle_numbers(req, start)
+    assert start[1][0]["steps"] == [{"expect_text": "0"}] and start[1][0]["settled_start"] == [["5", "0"]], start
     # no agreement -> no change; a request with its own rules -> left to the examiner
     m = made()
     Examiner(FakeLLM({}, [], [""], predict=_counter_mind(quiet=True))).settle_numbers(req, m)
@@ -674,6 +755,28 @@ DONE
             except ValueError as e:
                 assert "not written" in str(e)
         sb.write_file("README.md", "NOTE: fine in a document\n")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_small_model_edits_land_or_say_why_not():
+    """Measured with a 3B model: an insertion whose SEARCH context skipped a line, and an "edit" whose
+    REPLACE equalled its SEARCH (a no-op, step after step)."""
+    root = tempfile.mkdtemp(prefix="jarvis_agenttest_")
+    try:
+        sb = Sandbox(root, os.path.join(root, "project"))
+        os.makedirs(sb.project, exist_ok=True)
+        sb.write_file("index.html", "<body>\n  <main>\n    <p id=\"n\">0</p>\n  </main>\n  <script src=\"app.js\"></script>\n</body>\n")
+        assert sb.edit_file("index.html", "</main>\n</body>", "</main>\n<button id=\"add5\">+5</button>\n</body>") == "edited index.html"
+        html = open(os.path.join(sb.project, "index.html")).read()
+        assert '  </main>\n  <button id="add5">+5</button>\n  <script src="app.js">' in html, html
+        said = sb.edit_file("index.html", "<p id=\"n\">0</p>", "<p id=\"n\">0</p>")
+        assert said.startswith("index.html NOT changed"), said
+        try:
+            sb.edit_file("index.html", "<div>absent</div>", "<div>x</div>")
+            raise AssertionError("an edit that matches nothing is refused")
+        except ValueError as e:
+            assert "not found" in str(e)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

@@ -62,9 +62,16 @@ def _num(s: str) -> Optional[float]:
         return None
 
 
+def _lead_zero(s: str) -> bool:
+    d = s.lstrip("+-\u2212")
+    return len(d) > 1 and d[0] == "0" and d[1].isdigit()
+
+
 def _num_equal(token: str, want: str) -> bool:
     t, w = _num(token), _num(want)
     if t is None or w is None:
+        return False
+    if _lead_zero(token) and not _lead_zero(want):   # "05" is not the number 5 (it is "0" + 5 glued as text)
         return False
     if abs(t - w) < 1e-9:
         return True

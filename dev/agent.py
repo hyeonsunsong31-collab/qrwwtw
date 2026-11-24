@@ -399,6 +399,12 @@ class DevAgent:
         for c in crit:
             if c["id"] in made:
                 new = made[c["id"]]
+                for k in new:                       # "starting at 5" when the start is worked out as 0
+                    for was, now in k.pop("settled_start", []) or []:
+                        pat = rf"(?<![\w.]){re.escape(was)}(?!\w|\.\d)"          # "at 5." yes, "5.5" no
+                        if len(re.findall(pat, c["text"])) == 1:
+                            c["text"] = re.sub(pat, now, c["text"], count=1)
+                            self.log("examiner", f"criterion {c['id']} now reads: {c['text'][:120]}")
                 if only and c.get("checks"):
                     new = [k for k in new if Examiner.still_tests(c["text"], k)] or None
                     if not new:
@@ -739,7 +745,7 @@ class DevAgent:
             if idx is None:
                 continue
             check = c["checks"][idx]
-            if check.get("confirmed") and re.search(r"expected text '[-+\u2212]?\d", f.get("detail") or ""):
+            if check.get("confirmed") and re.search(r"expected (text '|\[')[-+\u2212]?\d", f.get("detail") or ""):
                 # the numbers this check expects were worked out one action at a time by a vote: a single
                 # judgement cannot overrule them (measured: a 3B auditor sided with a "-" that stops at 0)
                 note = f"The examiner confirms criterion {cid} is NOT met: {(f['detail'] or '').splitlines()[0][:220]}"
@@ -1060,13 +1066,38 @@ _CONCRETE = re.compile(r"['\"“”‘’]|\d|(?<![\w])[+\-−×÷*/=<>](?![\w])
                        re.IGNORECASE)
 
 
+# generic aspects a small planner adds on its own (measured on a "temperature converter" request: "handles
+# invalid input gracefully", "provides usage instructions", "exits cleanly", "is tested with a variety of
+# inputs", "is documented with comments") -- kept only when the request itself is about that aspect
+_ASPECTS = [
+    re.compile(r"\b(invalid|errors?|error[- ]handling|gracefully|edge[- ]cases?|exceptions?|robust\w*|validat\w+|wrong input)\b", re.I),
+    re.compile(r"\b(usage|help (message|text|screen)|--help)\b", re.I),
+    re.compile(r"\b(exits?|exit code|terminat\w+)\b", re.I),
+    re.compile(r"\b(tested|testing|unit tests?|test suite|test cases?)\b", re.I),
+    re.compile(r"\b(document\w*|comments?|commented|readme|docstrings?)\b", re.I),
+    re.compile(r"\b(fast|quick(ly)?|performan\w+|efficient\w*|optimi[sz]\w+|responsive\w*)\b", re.I),
+    re.compile(r"\b(readab\w+|clean code|maintainab\w+|best practices|well[- ](structured|organi[sz]ed|written)|modular\w*)\b", re.I),
+    re.compile(r"\b(accessib\w+|aria|screen readers?)\b", re.I),
+    re.compile(r"\b(secur\w+|safe(ly)?|sanitiz\w+)\b", re.I),
+    # input classes the request never mentions ("handles negative numbers / floating-point numbers")
+    re.compile(r"\b(negative|floating[- ]point|floats?|decimals?|large numbers?|empty input|special characters|unicode)\b", re.I),
+    re.compile(r"\b(external dependenc\w+|no dependenc\w+|third[- ]party|librar(y|ies))\b", re.I),
+    re.compile(r"\baccepts?\b.*\bas input\b", re.I),
+]
+
+
 def _vague(criterion: str, asked: str) -> bool:
-    """A quality the user did not ask for and that names nothing checkable ("The page should be
-    responsive and accessible"): small planners add these although told not to (measured)."""
-    words = [m.group(0).lower() for m in _VAGUE.finditer(criterion or "")]
-    if not words or _CONCRETE.search(criterion or ""):
-        return False
+    """A criterion the user did not ask for: a quality that names nothing checkable ("The page should
+    be responsive and accessible"), or a generic aspect (error handling, usage text, tests, docs, speed,
+    style) the request never mentions. Small planners add both although told not to (measured)."""
+    crit = criterion or ""
     low = (asked or "").lower()
+    for asp in _ASPECTS:
+        if asp.search(crit) and not asp.search(low):
+            return True
+    words = [m.group(0).lower() for m in _VAGUE.finditer(crit)]
+    if not words or _CONCRETE.search(crit):
+        return False
     return not any(w[:6] in low for w in words)
 
 

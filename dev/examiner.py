@@ -42,7 +42,7 @@ _CLI_SCHEMA = {"type": "object", "properties": {"checks": {"type": "array", "ite
     "type": "object", "properties": {
         "criterion": {"type": "integer"}, "why": _WHY, "args": {"type": "string"}, "stdin": {"type": "string"},
         "expect": {"type": "array", "items": {"type": "string"}}},
-    "required": ["criterion", "why", "expect"]}}}, "required": ["checks"]}
+    "required": ["criterion", "why", "args", "expect"]}}}, "required": ["checks"]}
 _HTTP_SCHEMA = {"type": "object", "properties": {"checks": {"type": "array", "items": {
     "type": "object", "properties": {
         "criterion": {"type": "integer"}, "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"]},
@@ -88,9 +88,12 @@ WEB_RULES = (
     "Step format: {\"action\": click|fill|press|wait|expect_text|expect_not_text|expect_visible|expect_count|"
     "expect_changed|select, \"target\": <selector, or the key for press>, \"value\": <text to type / expected text / "
     "count / milliseconds>}.\n" + WEB_EXAMPLE)
-CLI_RULES = ("Write command-line checks: the arguments a user would pass (args), any typed input (stdin), and short "
-             "texts the output must contain (expect) -- numbers or key words, not whole sentences. You define the "
-             "command-line interface here; keep it obvious (e.g. args \"100 --to fahrenheit\").")
+CLI_RULES = ("Write command-line checks: the arguments a user would pass (args -- REQUIRED: the exact words typed after the "
+             "program's name; a check without args runs the program with nothing), any typed input (stdin), and short "
+             "texts the output must contain (expect) -- numbers or key words, not whole sentences. Use the examples the "
+             "request gives. Only the program's OUTPUT can be checked (never its comments or code).\n"
+             "Example -- request \"a temperature converter: 100 --to f prints 212\": {\"criterion\": 1, \"why\": \"100 C is "
+             "212 F\", \"args\": \"100 --to f\", \"expect\": [\"212\"]}")
 HTTP_RULES = "Write HTTP checks against the server: method, path, optional JSON body, expected status and texts in the answer."
 FILE_RULES = "Write file checks: the file the program must produce (path inside the project), its format, texts it must contain."
 
@@ -234,6 +237,59 @@ def _describe(step: dict) -> Optional[str]:
     return None
 
 
+# "100 --to f prints 212", "`conv 0 c` gives 32", "running it with 5 outputs 25", "3 + 4 should print 7"
+_TOK = r"(?:-?\d+(?:\.\d+)?|--?[A-Za-z][\w-]*|(?!(?:should|will|must|would)\b)[A-Za-z][\w.]{0,15}|[+*/×÷^%=-])"
+_VERB = r"(?:(?:should|will|must|would)\s+)?(?:prints?|gives?|outputs?|returns?|shows?|displays?|->|=>|→|=)"
+_EXAMPLE = re.compile(r"`([^`]{1,80})`\s+" + _VERB + r"""\s+[`'"]?(-?[\w.%°]+)|(""" + _TOK + r"(?:\s+" + _TOK + r"){0,7})\s+"
+                      + _VERB + r"""\s+[`'"]?(-?[\w.%°]+)""", re.IGNORECASE)
+_FILLER = {"run", "running", "runs", "it", "with", "given", "input", "inputs", "eg", "e.g.", "like", "so", "then", "and",
+           "the", "a", "an", "for", "example", "typing", "type", "calling", "call", "passing", "pass", "args", "arguments"}
+
+
+def _examples(request: str) -> List[tuple]:
+    """(arguments, result) pairs from the request's own examples."""
+    out = []
+    for m in _EXAMPLE.finditer(request or ""):
+        words = (m.group(1) or m.group(3) or "").split()
+        result = (m.group(2) or m.group(4) or "").strip(".,;:")
+        while words and words[0].lower().strip("()") in _FILLER:
+            words = words[1:]
+        if m.group(1) and words and re.match(r"^(python3?|py|node|\./)", words[0], re.I):
+            words = words[2:] if words[0].lower().startswith(("python", "py", "node")) else words[1:]
+        rest = " ".join(words[1:])
+        if len(words) > 1 and re.match(r"^[A-Za-z][\w.]*$", words[0]) and re.search(r"\d|(?:^|\s)--?\w", rest):
+            words = words[1:]                       # "calc 3 + 4": the program's name, then its arguments
+        args = " ".join(words).strip("()`'\"")
+        if args and result and re.search(r"\d|--?\w|\w", args):
+            out.append((args, result))
+    return out
+
+
+def fill_cli_args(request: str, made: Dict[int, List[dict]]) -> List[str]:
+    """A command-line check without arguments cannot test a conversion: take them from the request's
+    own example whose result the check expects (measured: a 3B examiner wrote every check with empty
+    args, so "expect 212" ran the program with nothing)."""
+    examples = _examples(request)
+    done = []
+    for cid, checks in made.items():
+        for chk in checks:
+            if chk.get("type") != "cli" or str(chk.get("args") or "").strip() or str(chk.get("stdin") or "").strip():
+                continue
+            for args, result in examples:
+                if any(_same(result, e) for e in chk.get("expect") or []):
+                    chk["args"] = args
+                    done.append(f"criterion {cid}: {args!r} -> {result}")
+                    break
+    return done
+
+
+def _same(a: str, b: str) -> bool:
+    try:
+        return abs(float(a) - float(str(b).strip())) < 1e-9
+    except ValueError:
+        return str(a).strip().lower() == str(b).strip().lower()
+
+
 class Examiner:
     def __init__(self, llm, log: Optional[Callable[[str, str], None]] = None, retry=None):
         self.llm = llm
@@ -288,6 +344,11 @@ class Examiner:
                 out.setdefault(cid, []).append(dict(chk, by="jarvis"))
         for cid in out:
             out[cid] = out[cid][:3]
+        if kind in ("cli", "library", "other"):
+            filled = fill_cli_args(request, out)
+            if filled:
+                self.log("examiner", "took the arguments from the request's own examples: " + "; ".join(filled))
+            self.settle_cli_numbers(request, out)
         self.log("examiner", f"wrote checks for criteria {sorted(out)}")
         if kind in ("web", "game-web") and out:
             fixed = self.settle_numbers(request, out)
@@ -413,10 +474,26 @@ class Examiner:
                         if float(want.replace("\u2212", "-")) != float(state):
                             st["expect_text"] = state
                             chk["settled"] = True
+                            if len(trace) == 1:     # the page as it opens: the criterion's own words may say it too
+                                chk.setdefault("settled_start", []).append([want, state])
                             fixed.append(f"criterion {cid}: expects {state}, not {want} ({'; '.join(trace)})")
                 if numbers and compared == numbers:
                     chk["confirmed"] = True         # every number it expects was worked out the same way
         return fixed
+
+    def settle_cli_numbers(self, request: str, made: Dict[int, List[dict]]) -> List[str]:
+        """Command-line checks whose arguments AND result are the request's own example ("100 --to f prints
+        212") are confirmed; nothing else is changed. A model vote was measured here and rejected: asked
+        what "-100 --to f" prints, a 3B model answered with the request's example output (212) in two
+        of three ways, so the vote would have made right checks wrong. Returns what was corrected (none)."""
+        given = {a: r for a, r in _examples(request)}
+        for checks in made.values():
+            for chk in checks:
+                args = str(chk.get("args") or "").strip()
+                nums = [str(e).strip() for e in chk.get("expect") or [] if _NUMBER.fullmatch(str(e).strip())]
+                if chk.get("type") == "cli" and args in given and len(nums) == 1 and _same(given[args], nums[0]):
+                    chk["confirmed"] = True
+        return []
 
     def _value_after(self, request: str, before: Optional[str], action: Optional[str], memo: dict) -> Optional[str]:
         """The number the page shows after one action (or when it opens), by a vote of three ways of
@@ -476,13 +553,18 @@ class Examiner:
             "reason": {"type": "string"},
             "steps": _WEB_SCHEMA["properties"]["checks"]["items"]["properties"]["steps"]},
             "required": ["verdict", "reason"]}
+        cli = kind in ("cli", "library", "other") and check.get("type") == "cli"
         if kind not in ("web", "game-web"):
             schema["properties"].pop("steps")
+        if cli:                                      # a corrected command line: arguments and what it prints
+            schema["properties"]["args"] = {"type": "string"}
+            schema["properties"]["expect"] = {"type": "array", "items": {"type": "string"}}
         system = ("You are the examiner. One of your acceptance checks keeps failing. Decide honestly: is your CHECK "
                   "wrong (wrong element, impossible expectation, not what the criterion means), or is the PROGRAM "
                   "wrong (it really does not do what the criterion says)? If the check is wrong, write a corrected "
                   "one that still tests the criterion's meaning and labels." +
-                  ("\n" + WEB_RULES if kind in ("web", "game-web") else "") + "\nAnswer with JSON only.")
+                  ("\n" + WEB_RULES if kind in ("web", "game-web") else "\n" + CLI_RULES if cli else "") +
+                  "\nAnswer with JSON only.")
         user = (f"Request: {request}\nCriterion {criterion.get('id')}: {criterion.get('text')}\n"
                 f"The check: {json.dumps(check, ensure_ascii=False)}\nHow it fails: {failure[:800]}\n"
                 f"What the program shows:\n{evidence[:2500]}")
@@ -497,6 +579,16 @@ class Examiner:
                 res["check"] = dict(chk, by="jarvis")
             else:
                 res["verdict"] = "program_wrong" if not chk else "check_kept"
+        elif verdict == "check_wrong" and cli and out.get("expect"):
+            chk = {"type": "cli", "args": str(out["args"] if out.get("args") is not None else check.get("args", "")),
+                   "stdin": str(check.get("stdin") or ""), "expect": [str(e) for e in out["expect"] if str(e).strip()][:4]}
+            key = lambda k: json.dumps([str(k.get("args") or "").strip(), k.get("expect")], sort_keys=True)
+            if chk["expect"]:
+                self.settle_cli_numbers(request, {criterion.get("id", 0): [chk]})
+            if chk["expect"] and key(chk) not in [key(p) for p in previous]:
+                res["check"] = dict(chk, by="jarvis")
+            else:
+                res["verdict"] = "check_kept"
         return res
 
     # ------------------------------------------------------------ review

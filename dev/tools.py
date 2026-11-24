@@ -380,6 +380,42 @@ def _refuse_leaks(path: str, content: str) -> None:
                              f"format, not of the file (a block was left open). Write the file's own content only.")
 
 
+def _anchored_insert(text: str, search: str, replace: str) -> Optional[str]:
+    """An edit that only ADDS lines, whose SEARCH context is a little off (measured: a 3B model searched
+    for "</main> </body> </html>" in a page that has a <script> line in between): insert the new lines
+    next to a context line that occurs exactly once in the file."""
+    import difflib
+    s_lines = [ln for ln in search.strip("\n").splitlines()]
+    r_lines = [ln for ln in replace.strip("\n").splitlines()]
+    sm = difflib.SequenceMatcher(a=[x.strip() for x in s_lines], b=[x.strip() for x in r_lines], autojunk=False)
+    ops = [op for op in sm.get_opcodes() if op[0] != "equal"]
+    if len(ops) != 1 or ops[0][0] != "insert":
+        return None                                   # not a single pure insertion
+    _tag, i1, _i2, j1, j2 = ops[0]
+    added = r_lines[j1:j2]
+    lines = text.splitlines(keepends=True)
+    stripped = [ln.strip() for ln in lines]
+    eol = "\r\n" if "\r\n" in text else "\n"
+
+    def unique(line: str) -> Optional[int]:
+        idx = [k for k, x in enumerate(stripped) if x and x == line.strip()]
+        return idx[0] if len(idx) == 1 else None
+    before = unique(s_lines[i1 - 1]) if i1 > 0 else None
+    if before is not None:
+        at, ref = before + 1, lines[before]
+    else:
+        after = unique(s_lines[i1]) if i1 < len(s_lines) else None
+        if after is None:
+            return None
+        at, ref = after, lines[after]
+    indent = re.match(r"\s*", ref).group(0)
+    base = min((len(x) - len(x.lstrip()) for x in added if x.strip()), default=0)
+    block = "".join((indent + x[base:] if x.strip() else "") + eol for x in added)
+    if at > 0 and not lines[at - 1].endswith(("\n", "\r")):
+        block = eol + block
+    return "".join(lines[:at]) + block + "".join(lines[at:])
+
+
 def _fuzzy_replace(text: str, search: str, replace: str) -> Optional[str]:
     """SEARCH text that differs only in indentation or trailing spaces still matches once."""
     if not search.strip():
@@ -391,7 +427,7 @@ def _fuzzy_replace(text: str, search: str, replace: str) -> Optional[str]:
     n = len(want)
     hits = [i for i in range(len(lines) - n + 1) if stripped[i:i + n] == want]
     if len(hits) != 1:
-        return None
+        return _anchored_insert(text, search, replace)
     i = hits[0]
     indent = re.match(r"\s*", lines[i]).group(0)
     rep_lines = replace.strip("\n").splitlines()

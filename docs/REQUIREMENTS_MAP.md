@@ -61,7 +61,7 @@
 | D9 | 크레딧 제한·요금 없음 | `dev/models.py`, `config/jarvis.config.json` `dev` | 전부 로컬: Ollama qwen2.5-coder(메모리에 맞는 가장 큰 크기 자동 선택·다운로드), 계정·API 키 없음, 공개 링크도 무료. 메모리가 부족하면 작업 중 코딩 모델이 채팅도 답함. | ✅ |
 
 ## 빌드 호스트에서 실행한 검증
-- v1.5.0: `tests/test_dev_core.py` 7/7 · `tests/test_dev_files.py` 8/8 · `tests/test_dev_agent.py` 17/17 · `tests/test_dev_service.py` 6/6 ·
+- v1.5.0: `tests/test_dev_core.py` 7/7 · `tests/test_dev_files.py` 8/8 · `tests/test_dev_agent.py` 21/21 · `tests/test_dev_service.py` 6/6 ·
   실제 Electron Workspaces E2E(11단계) · 실제 qwen2.5-coder:3b 코딩 루프(카운터 페이지 — 결과를 별도 스크립트로 확인) · 실제 ini → 실행 파일.
 - `tests/test_core.py` 7/7 · `tests/test_phase2.py` 7/7 · `tests/test_drive.py` 7/7 · `tests/test_voice_engine.py` 5/5 ·
   `tests/test_self_model.py` 10/10 · `tests/test_boot.py` 15/15 · `tests/test_speed.py` 16/16 · `tests/test_startup.py` 9/9 · `scripts/mock_run.py` · `scripts/healthcheck.py`.
