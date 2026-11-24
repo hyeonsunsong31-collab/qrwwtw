@@ -1,0 +1,4 @@
+{
+ "description": "a web page or small web app in plain HTML, CSS and JavaScript (no build step)",
+ "kind": "web"
+}

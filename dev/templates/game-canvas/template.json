@@ -1,0 +1,4 @@
+{
+ "description": "a 2D browser game on an HTML canvas with keyboard controls (no libraries)",
+ "kind": "game-web"
+}

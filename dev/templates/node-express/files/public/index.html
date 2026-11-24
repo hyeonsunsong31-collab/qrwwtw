@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{{TITLE}}</title></head>
+<body style="font-family: system-ui; background:#0b1220; color:#e6edf7; padding:2rem">
+  <h1>{{TITLE}}</h1>
+  <button id="load" type="button">Ask the server</button>
+  <pre id="out"></pre>
+  <script>
+    document.getElementById('load').addEventListener('click', async () => {
+      const r = await fetch('/api/hello');
+      document.getElementById('out').textContent = JSON.stringify(await r.json(), null, 2);
+    });
+  </script>
+</body>
+</html>

@@ -244,7 +244,72 @@ body { font-family: var(--font); color: var(--cyan-soft);
 .toast.info { border-color: var(--cyan-dim); box-shadow: 0 0 16px var(--cyan-glow); }
 .toast .fix { font-size: 12px; opacity: .85; }
 
-/* v1.5.0: permission toasts ask in plain words and can be answered by voice or text */
+/* v1.4.4: permission toasts ask in plain words and can be answered by voice or text */
 .toast .perm-q { margin: 4px 0 2px; font-size: 13px; }
 .toast .perm-detail { opacity: .72; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
 .toast .perm-hint { opacity: .6; font-size: 10.5px; margin: 4px 0 2px; }
+
+/* v1.5.0: developer workspaces panel, chat attachments and product cards */
+#ws-panel { left: 50%; top: 92px; transform: translateX(-50%); width: min(820px, 92vw); max-height: 78vh;
+  display: flex; flex-direction: column; overflow: hidden; z-index: 3; }
+#ws-panel.drop, #chat-panel.drop { box-shadow: 0 0 0 2px var(--cyan), 0 0 28px var(--cyan-glow); }
+#ws-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 12px; letter-spacing: .2em;
+  text-transform: uppercase; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(56,225,255,.1), transparent); }
+#ws-head > span { flex: 1; }
+#ws-head button, #ws-detail button, .prod-row button, #chat-staged button, .ws-file button { font-family: var(--font);
+  background: rgba(2,12,18,.7); color: #eafdff; border: 1px solid var(--cyan-dim); border-radius: 6px; padding: 4px 9px;
+  cursor: pointer; font-size: 12px; letter-spacing: .04em; text-transform: none; }
+#ws-head button:hover, #ws-detail button:hover, .prod-row button:hover { border-color: var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
+#ws-new-name { background: rgba(2,12,18,.8); color: #eafdff; border: 1px solid var(--cyan); border-radius: 6px; padding: 4px 8px;
+  font-family: var(--font); width: 180px; letter-spacing: normal; text-transform: none; }
+#ws-body { display: flex; min-height: 0; flex: 1; }
+#ws-list { width: 190px; flex: none; overflow-y: auto; border-right: 1px solid var(--line); padding: 8px; display: flex;
+  flex-direction: column; gap: 4px; }
+.ws-slot { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 8px; border-radius: 8px;
+  background: transparent; border: 1px solid transparent; color: var(--cyan-soft); font-family: var(--font); font-size: 13px; cursor: pointer; }
+.ws-slot:hover { border-color: var(--cyan-dim); }
+.ws-slot.sel { border-color: var(--cyan); background: rgba(56,225,255,.08); }
+.ws-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-count { font-size: 11px; opacity: .6; }
+.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(138,243,255,.35); flex: none; }
+.ws-dot.working { background: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); animation: wspulse 1.2s infinite; }
+.ws-dot.queued { background: var(--amber); } .ws-dot.paused { background: #b8a6ff; } .ws-dot.failed { background: var(--danger); }
+@keyframes wspulse { 50% { opacity: .35; } }
+#ws-detail { flex: 1; overflow-y: auto; padding: 10px 14px 12px; font-size: 13px; min-width: 0; }
+#ws-detail h5 { margin: 12px 0 6px; font-size: 10.5px; letter-spacing: .24em; text-transform: uppercase; opacity: .7; }
+.ws-empty { opacity: .65; padding: 18px 6px; font-size: 13px; }
+.ws-title { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.ws-kind { font-size: 11px; opacity: .6; text-transform: uppercase; letter-spacing: .14em; }
+.ws-ctl { margin-left: auto; display: flex; gap: 4px; }
+.ws-ctl .danger:hover { border-color: var(--danger); box-shadow: 0 0 10px rgba(255,93,108,.5); }
+.ws-product { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--cyan-dim); border-radius: 8px; background: rgba(56,225,255,.06); }
+.ws-prod-title { font-size: 12px; letter-spacing: .1em; margin-bottom: 6px; }
+.ws-prod-row, .prod-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-activity { margin: 8px 0 4px; color: #eafdff; }
+.ws-bar { height: 4px; border-radius: 2px; background: rgba(120,230,255,.15); overflow: hidden; }
+.ws-bar i { display: block; height: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); transition: width .4s; }
+.ws-meta { font-size: 11px; opacity: .65; margin-top: 4px; }
+.ws-crit, .ws-reqs { list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.ws-crit li { display: flex; gap: 8px; font-size: 12.5px; }
+.ws-crit li span { width: 14px; flex: none; text-align: center; }
+.ws-crit li.pass span { color: #6dffb0; } .ws-crit li.fail span { color: var(--danger); }
+.ws-reqs li { font-size: 12.5px; padding: 3px 0; border-bottom: 1px dashed rgba(120,230,255,.12); }
+.ws-reqs li em { font-style: normal; opacity: .65; margin-left: 6px; }
+.ws-reqs li .st { display: inline-block; width: 18px; text-align: center; }
+.ws-reqs li.working .st { color: var(--cyan); } .ws-reqs li.done .st { color: #6dffb0; } .ws-reqs li.failed .st { color: var(--danger); }
+.ws-log pre { white-space: pre-wrap; font-size: 11px; opacity: .8; max-height: 160px; overflow-y: auto; margin-top: 6px;
+  font-family: Consolas, monospace; }
+.ws-add { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.ws-add textarea { width: 100%; resize: vertical; background: rgba(2,12,18,.75); color: #eafdff; border: 1px solid var(--cyan-dim);
+  border-radius: 8px; padding: 8px; font-family: var(--font); font-size: 13px; -webkit-user-select: text; user-select: text; }
+.ws-add-row { display: flex; align-items: center; gap: 8px; }
+.ws-add-row .primary { margin-left: auto; border-color: var(--cyan); }
+.ws-drop { font-size: 11px; opacity: .55; }
+.ws-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 6px; margin: 2px 4px 2px 0;
+  border: 1px solid var(--cyan-dim); border-radius: 12px; }
+.ws-file button { padding: 0 5px; font-size: 11px; }
+#ws-status { padding: 7px 14px; font-size: 11.5px; border-top: 1px solid var(--line); min-height: 28px; opacity: .85; }
+#ws-status.bad { color: var(--danger); }
+#chat-staged { padding: 4px 12px 0; display: flex; flex-wrap: wrap; }
+.msg.product { border-color: var(--cyan); }
+.msg.product .prod-title { margin-bottom: 6px; color: #eafdff; }

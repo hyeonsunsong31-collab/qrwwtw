@@ -1,5 +1,5 @@
 """
-Clock skills (v1.5.0): the time and date, timers and reminders.
+Clock skills (v1.4.4): the time and date, timers and reminders.
 
   "what time is it" / "지금 몇 시야"                      -> time_now()
   "set a timer for 5 minutes" / "5분 타이머"              -> set_timer(duration="5 minutes")

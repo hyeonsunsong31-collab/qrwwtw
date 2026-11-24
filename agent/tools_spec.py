@@ -1,7 +1,7 @@
 """
 agent/tools_spec.py -- what the language model may DO on the PC, described so it actually does it.
 
-Before v1.5.0 the model was told to write <action name="...">{...}</action> after its sentence.
+Before v1.4.4 the model was told to write <action name="...">{...}</action> after its sentence.
 Small local models mostly wrote the sentence ("Right away, sir -- opening Notepad.") and left
 the action out, so nothing happened: measured with qwen2.5:3b, 1 command in 15 was carried out.
 Native tool calling (Ollama `tools`, which Qwen 2.5 is trained for) with real parameter schemas
@@ -88,6 +88,13 @@ SPECS: Dict[str, Tuple[str, Dict[str, dict], List[str]]] = {
                   "something only a command can do (network, processes, system details) and no other tool fits. "
                   "Never for arithmetic or questions you can answer yourself.",
                   {"command": _p("the PowerShell command")}, ["command"]),
+    "dev_request": ("Build new software, or change the program in the selected developer workspace (a game, website, app, "
+                    "AI, script, tool): JARVIS's developer works on it until it passes its checks. Use for any request to "
+                    "build, code, make or modify a program.", {"text": _p("the full request, in the user's words")}, ["text"]),
+    "dev_convert": ("Convert a file into another format (e.g. png to ico, ini to exe, md to pdf).",
+                    {"src": _p("the file (a path, a name, or 'it' for the last attached file)"),
+                     "fmt": _p("the new format, e.g. ico, exe, pdf")}, ["fmt"]),
+    "ws_status": ("Say how the developer's current work is going.", {}, []),
     "open_space3d": ("Open the 3D project space.", {}, []),
     "close_space3d": ("Close the 3D project space.", {}, []),
     "self_remember": ("Remember something the user tells you about themselves or how they like things done.",
@@ -125,6 +132,9 @@ TOOL_ALIASES = {
     "explore_folder": "open_folder", "next_track": "media_control", "pause_music": "media_control",
     "resume_music": "media_control", "mute": "set_volume", "unmute": "set_volume",
     "remember": "self_remember", "shutdown": "power", "restart": "power", "reboot": "power",
+    "build": "dev_request", "build_app": "dev_request", "create_app": "dev_request", "make_game": "dev_request",
+    "code": "dev_request", "develop": "dev_request", "write_program": "dev_request", "convert": "dev_convert",
+    "convert_file": "dev_convert", "build_status": "ws_status",
 }
 _IMPLIED = {"shutdown": {"action": "shutdown"}, "restart": {"action": "restart"}, "reboot": {"action": "restart"},
             "next_track": {"action": "next"}, "pause_music": {"action": "pause"}, "resume_music": {"action": "resume"},

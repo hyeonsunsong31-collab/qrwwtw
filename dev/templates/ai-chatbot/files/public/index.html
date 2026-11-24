@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><title>{{TITLE}}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0b1220; color: #e6edf7; margin: 0; }
+    main { max-width: 760px; margin: 0 auto; padding: 1.5rem; }
+    #log { min-height: 300px; border: 1px solid #23324f; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
+    .msg { margin: .4rem 0; } .user { color: #93c5fd; } .bot { color: #e6edf7; }
+    form { display: flex; gap: .5rem; } input { flex: 1; padding: .6rem; } button { padding: .6rem 1rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>{{TITLE}}</h1>
+  <div id="log"></div>
+  <form id="f"><input id="q" placeholder="Ask something" autocomplete="off"><button id="send">Send</button></form>
+</main>
+<script>
+  const log = document.getElementById('log'), messages = [];
+  function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; log.appendChild(d); return d; }
+  document.getElementById('f').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = document.getElementById('q'); const text = q.value.trim(); if (!text) return;
+    q.value = ''; add('user', 'You: ' + text); messages.push({ role: 'user', content: text });
+    const pending = add('bot', 'Thinking...');
+    try {
+      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) });
+      const j = await r.json();
+      pending.textContent = j.reply ? 'AI: ' + j.reply : 'Error: ' + j.error;
+      if (j.reply) messages.push({ role: 'assistant', content: j.reply });
+    } catch (err) { pending.textContent = 'Error: ' + err; }
+  });
+</script>
+</body>
+</html>

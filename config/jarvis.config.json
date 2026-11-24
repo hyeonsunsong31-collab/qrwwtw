@@ -1,5 +1,5 @@
 {
-  "version": "1.4.4",
+  "version": "1.5.0",
   "identity": {
     "name": "JARVIS",
     "persona": "A refined British gentleman's valet in the spirit of a classic butler: courteous, witty, concise, unflappable. Addresses the user as 'sir' unless told otherwise.",
@@ -9,7 +9,10 @@
   "language": {
     "default": "en",
     "auto_switch": true,
-    "supported": ["en", "ko"],
+    "supported": [
+      "en",
+      "ko"
+    ],
     "notes": "Default language is English. When the user's input is Korean, replies and UI switch to Korean automatically (requirement 2). The signature voice is British English."
   },
   "voice": {
@@ -42,7 +45,12 @@
     },
     "barge_in": {
       "mode": "keyword",
-      "keywords": ["stop", "wait", "hold on", "jarvis"],
+      "keywords": [
+        "stop",
+        "wait",
+        "hold on",
+        "jarvis"
+      ],
       "notes": "keyword (default): say 'stop', 'wait', 'hold on' or 'Jarvis' while I'm speaking to interrupt, which never self-triggers on speakers. vad: any speech interrupts (best with a headset). off: no voice interruption (typing or the mic button still interrupt)."
     },
     "input_device": "default",
@@ -67,11 +75,21 @@
     "enabled": true,
     "nominal_neurons": 200000000000,
     "active_neurons": "auto",
-    "active_neurons_bounds": [20000, 2000000],
+    "active_neurons_bounds": [
+      20000,
+      2000000
+    ],
     "latency_budget_ms": 60,
     "settle_steps": 10,
     "synapse_plasticity": true,
-    "modules": ["cortex", "cerebellum", "thalamus", "brainstem", "hippocampus", "basal_ganglia"],
+    "modules": [
+      "cortex",
+      "cerebellum",
+      "thalamus",
+      "brainstem",
+      "hippocampus",
+      "basal_ganglia"
+    ],
     "notes": "nominal_neurons is the documented design scale (requirement 1). active_neurons is what actually instantiates: with 'auto', the smaller of what RAM allows and what keeps one command's settle (settle_steps steps) within latency_budget_ms, measured on this PC at start-up -- the mesh runs on every command before JARVIS answers. The mesh runs as a control/modulation layer over the LLM output."
   },
   "self_model": {
@@ -105,5 +123,14 @@
     "autostart_on_boot": true,
     "run_in_background": true,
     "method": "windows-task-scheduler-logon"
+  },
+  "dev": {
+    "enabled": true,
+    "model": "auto-largest",
+    "max_hours": 0,
+    "share_model_for_chat": "auto",
+    "keep_alive": "15m",
+    "protocol": "auto",
+    "notes": "Developer workspaces (v1.5.0). model: auto-largest = the largest qwen2.5-coder that fits this PC's memory (downloaded the first time), or a model name. max_hours: 0 = no limit -- JARVIS keeps working until every check passes or you press Stop. share_model_for_chat: when the chat model and the coding model do not fit in memory together, chat uses the coding model while a job runs. protocol: auto | tools | text (how the coding model acts). Everything runs locally: no accounts, no API keys, no credits, no cost."
   }
 }

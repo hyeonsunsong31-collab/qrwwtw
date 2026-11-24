@@ -1,0 +1,7 @@
+{
+  "kind": "web",
+  "build": [
+    "npm install"
+  ],
+  "run": "npm start"
+}

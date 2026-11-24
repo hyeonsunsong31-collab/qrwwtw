@@ -1,0 +1,4 @@
+{
+ "description": "a C# console program (.NET SDK)",
+ "kind": "cli"
+}

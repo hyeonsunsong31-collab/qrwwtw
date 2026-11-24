@@ -1,6 +1,6 @@
-# 요구사항 → 구현 매핑 (v1.4.4)
+# 요구사항 → 구현 매핑 (v1.5.0)
 
-사용자가 제시한 21개 요구사항 + 추가 2개를 어디서/어떻게 구현했는지, 그리고 **어떻게 검증했는지**를 기록합니다.
+사용자가 제시한 21개 요구사항 + 추가 2개 + v1.5.0 개발 기능 요청(D1~D9)을 어디서/어떻게 구현했는지, 그리고 **어떻게 검증했는지**를 기록합니다.
 
 **상태 표식**
 - ✅ **실행 검증** — 빌드 호스트에서 실제 코드를 돌려 테스트로 확인.
@@ -50,8 +50,19 @@
 | 21 | 영국 신사 음성 | `voice/tts.py`, `config/jarvis.config.json` | Piper `en_GB-alan-medium` → Windows "George"(WinRT) → SAPI5. | ⚙️ |
 | + | 기본 언어 영어 | `config/jarvis.config.json` | | ✅ |
 | + | 더블클릭 영구작동 파일 | `INSTALL_JARVIS.bat` + `scripts/setup_windows.ps1` | 설치·화면 표시부·모델·음성·자동시작·자체 점검·실행·**표시 확인**. 재실행 시 이어하기·복구. | ✅(의존성 해결·런타임 다운로드·스크립트 정적 점검) ⚙️(실행) |
+| D1 | 전체 터미널 접근 · 로컬 "바이브 코딩" 개발 | `dev/` (`agent.py`, `tools.py`, `procs.py`), `agent/skills/devskills.py` | 워크스페이스 범위 터미널(안은 자유, 밖의 경로·설치는 확인, 위험 명령은 항상 확인), 프로세스 트리 종료, 프로젝트 .venv. 말·입력·HUD·대화 모델 도구로 요청. | ✅ 🌐 ⚙️(Windows 셸) |
+| D2 | .gba · .exe · .zip 등 보낸 프로그램 열기·고치기·업그레이드·재디자인 | `dev/files.py`, `DevAgent._prepare_inputs` | 압축 풀기(경로 탈출 차단, 7z/rar는 7-Zip 설치 확인), PE 분석(.NET·PyInstaller·Electron·UPX…) 후 PyInstaller 내용·asar 소스 추출, GBA 헤더·체크섬·IPS/BPS·타일. 원본은 input/에 보존. 네이티브 기계어는 원래 소스로 복원 불가(문서화). | ✅ |
+| D3 | 고르고 추가하는 세션 슬롯(워크스페이스) | `dev/workspaces.py`, `overlay/renderer/workspaces.js`, `overlay/main.js` | 슬롯 생성·선택·이름 변경·삭제(휴지통), 상세(산출물·진행·체크리스트·요청·기록), 📎/끌어놓기, Ctrl+Alt+W·독·말. | ✅ 🌐 |
+| D4 | 한 제품에 수정 요청 쌓기 | `dev/scheduler.py`, `DevAgent._previous`, `dev/history.py` | 슬롯 안에서는 준 순서대로, 각 요청은 앞 요청들의 기준을 다시 통과해야 완료, 요청마다 Git 커밋·되돌리기. | ✅ 🌐 |
+| D5 | 언어 장벽 없이 게임·AI·웹사이트(풀스택) | `dev/templates/` (11종), `dev/toolchains.py`, `dev/protocol.py` | 템플릿 + 템플릿 없이 아무 언어, 컴파일러·런타임 탐지와 winget 설치(확인). 작은 모델은 텍스트 지시문, 7B 이상은 도구 호출. | ✅ ⚙️(winget) |
+| D6 | 요구사항을 완전히 만족·제대로 작동할 때까지 멈추지 않음 | `dev/agent.py`, `dev/examiner.py`, `dev/verify.py` | 요청 → 수용 기준 → 독립 검사관(코드 전) → 실제 실행·브라우저 검증 → 수정 반복, 정체 대응·되돌려 새로 시작, 시간 제한 없음(중지 전까지), 재시작 후 이어서. 숫자 투표·깨진 검사 재작성·감사·증명 있는 검토. 실제 3B 모델로 카운터 페이지 완료 후 직접 확인. | ✅ |
+| D7 | 어떤 파일이든 다른 형식으로(.ini → .exe 등) | `dev/convert.py` | 이미지·데이터·문서·미디어·압축·3D·글꼴·→ 실행 파일(PyInstaller, 실제 빌드 확인), 없는 도구는 확인 후 설치·재시도, 변환기 없는 조합은 코딩 루프가 변환기를 만들어 검증. 전용 Conversions 슬롯. | ✅ ⚙️(Windows .exe) |
+| D8 | 결과는 파일로, 웹 제품은 링크로 | `dev/service.py` `_deliver`, `dev/serve.py`, `overlay/renderer/chat.js` | 채팅 카드(열기·폴더)와 output/, 웹은 로컬·와이파이·공개(cloudflared 무료 터널, 다운로드 확인) 링크, 말로 알림. HUD는 데이터 폴더 밖·비웹 링크 거부. | ✅ 🌐 |
+| D9 | 크레딧 제한·요금 없음 | `dev/models.py`, `config/jarvis.config.json` `dev` | 전부 로컬: Ollama qwen2.5-coder(메모리에 맞는 가장 큰 크기 자동 선택·다운로드), 계정·API 키 없음, 공개 링크도 무료. 메모리가 부족하면 작업 중 코딩 모델이 채팅도 답함. | ✅ |
 
 ## 빌드 호스트에서 실행한 검증
+- v1.5.0: `tests/test_dev_core.py` 7/7 · `tests/test_dev_files.py` 8/8 · `tests/test_dev_agent.py` 17/17 · `tests/test_dev_service.py` 6/6 ·
+  실제 Electron Workspaces E2E(11단계) · 실제 qwen2.5-coder:3b 코딩 루프(카운터 페이지 — 결과를 별도 스크립트로 확인) · 실제 ini → 실행 파일.
 - `tests/test_core.py` 7/7 · `tests/test_phase2.py` 7/7 · `tests/test_drive.py` 7/7 · `tests/test_voice_engine.py` 5/5 ·
   `tests/test_self_model.py` 10/10 · `tests/test_boot.py` 15/15 · `tests/test_speed.py` 16/16 · `tests/test_startup.py` 9/9 · `scripts/mock_run.py` · `scripts/healthcheck.py`.
 - `tests/test_server_e2e.py` — 실제 uvicorn 서버: 토큰 없는/잘못된/웹 Origin 접속 거부, 명령→UI 이벤트, 스트리밍(28 델타·3문장),

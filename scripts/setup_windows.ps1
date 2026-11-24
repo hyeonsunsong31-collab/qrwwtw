@@ -15,9 +15,12 @@
        get the 3B model (re-running the installer on an older install switches it)
     6. voices and speech models (British Piper voice, Vosk wake-phrase model,
        openWakeWord, Whisper, hand-tracking model, Windows en-GB/ko-KR voices)
-    7. folder permissions + auto-start at logon
-    8. self-test (scripts/healthcheck.py)
-    9. launch as the logged-on user, then wait until JARVIS is really on screen
+    7. developer workspaces (v1.5.0): Git and Node.js, and the coding model that fits this
+       PC (qwen2.5-coder, downloaded now only when the disk has room -- otherwise on first use).
+       Skip with -NoDevTools.
+    8. folder permissions + auto-start at logon
+    9. self-test (scripts/healthcheck.py)
+   10. launch as the logged-on user, then wait until JARVIS is really on screen
 
   Exit codes: 0 = installed and on screen, 2 = installed but it did not come up (the
   reason is printed), 1 = setup failed.
@@ -27,7 +30,7 @@
   This file is plain ASCII on purpose (Windows PowerShell 5.1 reads BOM-less scripts in the
   system code page).
 #>
-param([switch]$NoLaunch)
+param([switch]$NoLaunch, [switch]$NoDevTools)
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"      # Invoke-WebRequest is far faster without the bar
@@ -48,7 +51,7 @@ try { Start-Transcript -Path (Join-Path $Data "install.log") -Append | Out-Null 
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 $script:Fatal = $false
 
-function Section([int]$n, [string]$title) { Write-Host ""; Write-Host "==== [$n/9] $title ====" -ForegroundColor Cyan }
+function Section([int]$n, [string]$title) { Write-Host ""; Write-Host "==== [$n/10] $title ====" -ForegroundColor Cyan }
 function Ok([string]$m)   { Write-Host "  [ok]   $m" -ForegroundColor Green }
 function Info([string]$m) { Write-Host "  $m" }
 function Warn([string]$m) { Write-Host "  [warn] $m" -ForegroundColor Yellow; $script:Warnings.Add($m) }
@@ -354,7 +357,44 @@ foreach ($cap in @("Language.TextToSpeech~~~en-GB~0.0.1.0", "Language.TextToSpee
 }
 
 # ---------------------------------------------------------------------------- 7
-Section 7 "Permissions and auto-start"
+Section 7 "Developer workspaces (Git, Node.js, coding model)"
+if ($NoDevTools) {
+    Info "  skipped (-NoDevTools): JARVIS asks before installing these when a project needs them"
+} else {
+    # Git: one history commit per request (undo); without it JARVIS keeps zip snapshots instead.
+    if (Have "git") { Ok "Git $((& git --version) -replace 'git version ', '')" }
+    elseif (Winget-Install "Git.Git") { Ok "Git installed" }
+    else { Warn "Git could not be installed; workspaces keep zip snapshots for undo instead." }
+    # Node.js: web apps, Node servers and the JavaScript syntax check.
+    if (Have "node") { Ok "Node.js $(& node --version)" }
+    elseif (Winget-Install "OpenJS.NodeJS.LTS") { Ok "Node.js installed" }
+    else { Warn "Node.js could not be installed; JARVIS asks to install it when a project needs it." }
+    # The coding model: the largest qwen2.5-coder that fits this PC (dev\models.py). It is big, so
+    # it is downloaded now only when the disk keeps plenty of room; otherwise on the first request.
+    $Ollama = Find-Ollama
+    if ($Ollama -and (Test-Path $VPy)) {
+        $pick = & $VPy -c "from dev.models import pick, CODERS; m, c, w = pick(); print(m + '|' + str(dict((n, g) for n, g, *_ in CODERS).get(m, 5)) + '|' + w)" 2>$null | Select-Object -Last 1
+        if ($pick -and $pick.Contains("|")) {
+            $parts = $pick.Split("|")
+            $coder = $parts[0]; $coderGB = [double]$parts[1]
+            Info "  coding model for this PC: $coder (about $coderGB GB) -- $($parts[2])"
+            $have = (& $Ollama list 2>$null | Out-String)
+            $drive = (Split-Path -Qualifier $env:USERPROFILE).TrimEnd(":")
+            $free = 0
+            try { $free = [math]::Round((Get-PSDrive -Name $drive).Free / 1GB) } catch {}
+            if ($have -match [regex]::Escape($coder)) { Ok "coding model $coder ready" }
+            elseif ($free -ge ($coderGB + 15)) {
+                if (Retry { & $Ollama pull $coder } 2 "coding model download") { Ok "coding model $coder ready" }
+                else { Info "  the coding model will download with the first developer request" }
+            } else {
+                Info "  $free GB free on ${drive}: -- the coding model ($coderGB GB) will download with the first developer request"
+            }
+        } else { Info "  the coding model will be chosen and downloaded with the first developer request" }
+    }
+}
+
+# ---------------------------------------------------------------------------- 7
+Section 8 "Permissions and auto-start"
 # JARVIS runs as the logged-on user, so make sure that user can write its records.
 & icacls "$Data" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q | Out-Null
 Ok "data folder writable by users"
@@ -364,7 +404,7 @@ if (Test-Path $VPy) {
 }
 
 # ---------------------------------------------------------------------------- 8
-Section 8 "Self-test"
+Section 9 "Self-test"
 if (Test-Path $VPy) { & $VPy (Join-Path $Root "scripts\healthcheck.py") | Out-Host }
 if (Test-Path $VPy) {
     # can JARVIS's own Python code reach the language engine? (a system proxy used to break
@@ -381,7 +421,7 @@ if (Test-Path $VPy) {
 }
 
 # ---------------------------------------------------------------------------- 9
-Section 9 "Launch"
+Section 10 "Launch"
 $launchRc = 0
 if ($NoLaunch -or $script:Fatal) {
     Info "  not launching (see the warnings below)."

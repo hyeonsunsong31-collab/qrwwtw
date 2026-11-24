@@ -1,0 +1,7 @@
+{
+  "kind": "cli",
+  "test": [
+    "npm test"
+  ],
+  "run": "node index.js"
+}

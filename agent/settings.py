@@ -46,6 +46,13 @@ SCHEMA: Dict[str, dict] = {
                                   "label": "Pause that ends a spoken command (ms)"},
     "llm.context_tokens":        {"type": "int", "min": 2048, "max": 32768, "step": 1024,
                                   "label": "Language model context (tokens)", "restart": True},
+    "dev.enabled":               {"type": "bool", "label": "Developer workspaces"},
+    "dev.model":                 {"type": "str", "pattern": r"^[A-Za-z0-9_.:/-]{1,80}$",
+                                  "label": "Coding model (auto-largest = the largest that fits)"},
+    "dev.max_hours":             {"type": "float", "min": 0, "max": 168, "step": 0.5,
+                                  "label": "Developer time limit per request, hours (0 = none)"},
+    "dev.share_model_for_chat":  {"type": "choice", "choices": ["auto", "always", "never"],
+                                  "label": "Chat with the coding model while it works (saves memory)"},
     # the drop-down's options are the microphones connected right now (see get_settings)
     "voice.input_device":        {"type": "str", "pattern": r"^[^\x00-\x1f]{1,160}$",
                                   "label": "Microphone", "options": ["default"]},
@@ -56,7 +63,10 @@ LOCKED_PERMISSIONS: set = set()
 PERMISSION_LABELS = {
     "run_shell": "Run shell commands (PowerShell)",
     "run_shell_elevated": "Run shell commands as administrator (Windows asks each time)",
-    "install_software": "Install software (e.g. the language engine)",
+    "install_software": "Install software (e.g. the language engine, compilers for the developer)",
+    "dev_workspace": "Developer: files and commands inside a workspace",
+    "dev_outside": "Developer: paths outside the workspace",
+    "network_share": "Share a web product on the network or publicly",
 }
 
 

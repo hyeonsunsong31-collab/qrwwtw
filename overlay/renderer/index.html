@@ -65,8 +65,10 @@
       </div>
       <div id="transcript" role="log" aria-live="polite"></div>
       <div id="options-bar"></div>
+      <div id="chat-staged" class="hidden"></div>
       <form id="chat-form">
         <button type="button" id="btn-listen" class="mic" title="hold to speak" data-i18n-title="listen">🎙</button>
+        <button type="button" id="btn-attach" class="mic" title="attach files" data-i18n-title="attach_tip">📎</button>
         <input id="chat-input" type="text" autocomplete="off"
                data-i18n-ph="chat_ph" placeholder="Type or speak a command, sir…" />
         <button type="submit" id="chat-send" data-i18n="send">Send</button>
@@ -93,6 +95,21 @@
       </div>
       <div id="settings-body"></div>
       <div id="settings-status" aria-live="polite"></div>
+    </section>
+
+    <!-- Developer workspaces (v1.5.0): session slots, stacked requests, products and links -->
+    <section id="ws-panel" class="panel interactive hidden" aria-label="workspaces">
+      <div id="ws-head">
+        <span data-i18n="ws_title">Workspaces</span>
+        <input id="ws-new-name" class="hidden" type="text" maxlength="60" data-i18n-ph="ws_new_ph" placeholder="name, then Enter" />
+        <button id="ws-new" type="button" data-i18n="ws_new">+ New</button>
+        <button id="ws-close" class="x" title="close">×</button>
+      </div>
+      <div id="ws-body">
+        <nav id="ws-list" aria-label="workspace slots"></nav>
+        <div id="ws-detail"></div>
+      </div>
+      <div id="ws-status" aria-live="polite"></div>
     </section>
 
     <!-- Always-visible emergency wake button (requirements 9, 10) -->

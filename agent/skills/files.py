@@ -122,7 +122,7 @@ def list_dir(path: str = "~") -> dict:
               {"path": str(p), "entries": entries})
 
 
-# ------------------------------------------------------------------ folders (v1.5.0)
+# ------------------------------------------------------------------ folders (v1.4.4)
 # Windows' known folders (Desktop / Documents / ... may live in OneDrive)
 _KNOWN = {"desktop": "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}", "documents": "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}",
           "downloads": "{374DE290-123F-4565-9164-39C4925E467B}", "pictures": "{33E28130-4E1E-4676-835A-98395C3BC3BB}",

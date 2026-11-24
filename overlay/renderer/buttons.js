@@ -28,6 +28,7 @@ const FEATURES = [
   { id: "volume",    ic: "🔊", key: "feat.volume",    prefill: "set volume to " },
   { id: "devices",   ic: "🔌", key: "feat.devices",   cmd: "list my devices" },
   { id: "winsettings", ic: "⚙️", key: "feat.settings", cmd: "open settings" },
+  { id: "workspaces", ic: "🧑‍💻", key: "feat.workspaces", ui: "workspaces" },
   { id: "jsettings", ic: "🛠", key: "feat.jsettings", act: "open_settings" },
   { id: "chat",      ic: "💬", key: "feat.chat",      act: "toggle_chat" },
   { id: "aboutme",   ic: "🪞", key: "feat.aboutme",   cmd: "who are you" },

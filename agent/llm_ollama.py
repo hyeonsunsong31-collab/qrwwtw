@@ -185,7 +185,7 @@ def _messages(system: str, user: str, history: Optional[List[dict]]) -> List[dic
     msgs = [{"role": "system", "content": system}]
     for h in history or []:
         m = {"role": h["role"], "content": h.get("text", "")}
-        if h.get("calls"):                     # an assistant turn that called tools (v1.5.0)
+        if h.get("calls"):                     # an assistant turn that called tools (v1.4.4)
             m["tool_calls"] = [{"function": {"name": c["name"], "arguments": c.get("arguments") or {}}}
                                for c in h["calls"]]
         if h["role"] == "tool" and h.get("name"):
@@ -376,8 +376,9 @@ class OllamaLLM:
                         break
 
     def chat_json(self, system: str, user: str, schema: dict, params: Optional[dict] = None,
-                  timeout: float = 60.0) -> dict:
-        """One reply forced into a JSON schema (Ollama structured output)."""
+                  timeout: Optional[float] = None) -> dict:
+        """One reply forced into a JSON schema (Ollama structured output). The timeout is the
+        client's own (a slow PC writing a long plan needs minutes, not seconds)."""
         if httpx is None:
             raise RuntimeError("httpx not installed")
         body = self._body(system, user, [], params or {"temperature": 0.0, "num_predict": 200}, False)
@@ -501,8 +502,9 @@ class ResilientLLM:
         self._override = ""             # a smaller model chosen after a memory error
         self._too_big: set = set()      # models that did not fit in the memory (never used as fallback)
         self._pull_thread: Optional[threading.Thread] = None
-        self._tools_ok: Dict[str, bool] = {}     # model -> it has native tool calling (v1.5.0)
+        self._tools_ok: Dict[str, bool] = {}     # model -> it has native tool calling (v1.4.4)
         self.tools_enabled = True
+        self._lent: Optional["OllamaLLM"] = None  # the developer's coding model, while memory is shared (v1.5.0)
         self._pull_failed_at = 0.0
         self._pull_failures = 0
         self._recheck_models = True
@@ -564,6 +566,8 @@ class ResilientLLM:
                 self._resolved = True
 
     def model_name(self) -> str:
+        if self._lent is not None:
+            return self._lent.model
         return self.ollama.model if (self._online and not self._no_model) else "offline-fallback"
 
     # ------------------------------------------------------------ models #
@@ -678,6 +682,8 @@ class ResilientLLM:
         return snap() != before
 
     def _ensure(self, system: str):
+        if self._lent is not None and self.state == "ready":
+            return                  # a developer job is using the memory: do not reload the chat model now
         if self._install_thread is not None and self._install_thread.is_alive():
             self.state, self.problem = "installing", self.service.problem
             return
@@ -829,7 +835,12 @@ class ResilientLLM:
                 self._warm_failed_at = 0.0          # let the next ensure_warm step down at once
         self.log(f"reply failed ({kind}): {msg}")
 
-    # --------------------------------------------------------- tools (v1.5.0) #
+    # --------------------------------------------------------- tools (v1.4.4) #
+    def lend(self, llm: Optional["OllamaLLM"]) -> None:
+        """While a developer job runs and memory cannot hold both models, chat uses the coding
+        model (None gives the chat model back)."""
+        self._lent = llm
+
     def supports_tools(self) -> bool:
         """Whether replies use native tool calling: yes unless this model is known not to have it.
         (Deliberately independent of whether Ollama answers right now: the instructions must stay
@@ -837,6 +848,13 @@ class ResilientLLM:
         return bool(self.tools_enabled and self._tools_ok.get(_norm(self.ollama.model), True))
 
     def chat_stream_events(self, system, user, history=None, params=None, tools=None, stop_event=None):
+        lent = self._lent
+        if lent is not None:
+            try:
+                yield from lent.chat_stream_events(system, user, history, params, tools, stop_event)
+                return
+            except Exception as e:
+                self.log(f"the shared coding model did not answer ({e}); using the chat model")
         if self.online() and not self._no_model:
             yielded = False
             try:
@@ -874,6 +892,13 @@ class ResilientLLM:
         return self.mock.chat(system, user, history, params)
 
     def chat_stream(self, system, user, history=None, params=None, stop_event=None):
+        lent = self._lent
+        if lent is not None:
+            try:
+                yield from lent.chat_stream(system, user, history, params, stop_event)
+                return
+            except Exception:
+                pass
         if self.online() and not self._no_model:
             yielded = False
             try:

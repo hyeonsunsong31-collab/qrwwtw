@@ -1,0 +1,7 @@
+{
+  "kind": "cli",
+  "build": [
+    "dotnet build -nologo -v q"
+  ],
+  "run": "dotnet run --no-build --"
+}

@@ -1,0 +1,4 @@
+{
+ "description": "a desktop window app in Python with Tkinter (built in, no installs)",
+ "kind": "gui"
+}

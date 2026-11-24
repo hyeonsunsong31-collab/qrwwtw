@@ -70,7 +70,7 @@ from .permissions import PermissionManager
 from .llm_ollama import ResilientLLM, keep_alive_value
 from .ollama_service import is_loopback
 
-VERSION = "1.4.4"
+VERSION = "1.5.0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -289,9 +289,12 @@ class JarvisServer:
                                  control=self.control, permissions=self.permissions,
                                  emit=self._emit)
         self.token = write_session_token(os.path.join(data_dir, "session.token"))
-        from agent.skills import voicecheck, llmcheck, shell, clock
+        from agent.skills import voicecheck, llmcheck, shell, clock, devskills
+        from dev.service import DevService
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        clock.start(data_dir, notify=self._timer_due)    # timers and reminders (v1.5.0)
+        self.dev = DevService(self, data_dir, self.config)   # developer workspaces (v1.5.0)
+        devskills.set_service(self.dev)
+        clock.start(data_dir, notify=self._timer_due)    # timers and reminders (v1.4.4)
         voicecheck.set_provider(self.voice_report)       # "check the microphone" reads the live report
         llmcheck.set_provider(self.llm)                  # "check the language engine" / "install ..."
         shell.set_permission_writer(self.apply_permission)   # "allow shell commands" (user only)
@@ -325,6 +328,7 @@ class JarvisServer:
                 "voice_tts": bool(self.voice and self.voice.tts_ready()),
                 "voice_detail": self._voice_detail(),
                 "listening": bool(self.voice and self.voice.listening),
+                "dev": self.dev.brief() if hasattr(self, "dev") else None,
                 "neurons_active": int(self.mesh.N),
                 "neurons_nominal": int(self.mesh.scale.nominal_neurons),
                 "synapses_active": int(self.mesh.E)}
@@ -555,7 +559,7 @@ class JarvisServer:
 
     # ------------------------------------------------- permission asker #
     async def _ask_user(self, request: dict) -> bool:
-        """Ask before an action: a toast with Allow / Deny, and (v1.5.0) the question spoken
+        """Ask before an action: a toast with Allow / Deny, and (v1.4.4) the question spoken
         aloud -- then JARVIS listens for the answer without the wake phrase. A spoken or typed
         "yes" / "no" answers it (submit_command)."""
         rid = "perm_" + uuid.uuid4().hex[:10]
@@ -597,7 +601,7 @@ class JarvisServer:
         return False
 
     async def submit_command(self, text: str, source: str = "text"):
-        # "yes" / "no" while JARVIS waits for permission answers it -- before v1.5.0 it was a new
+        # "yes" / "no" while JARVIS waits for permission answers it -- before v1.4.4 it was a new
         # command that cancelled the very action waiting for the answer
         if self._pending_perms:
             from .nlu import answer_yes_no, detect_language
@@ -707,6 +711,7 @@ class JarvisServer:
         if self.orch.selfmodel is not None:
             self.orch.selfmodel.enabled = self.orch._self_learning()
         self.permissions.reload()
+        self.dev.reconfigure(self.config)
         if self.voice is not None:
             try:
                 self.voice.reconfigure(self.config)
@@ -774,6 +779,8 @@ class JarvisServer:
                 from agent.skills import system as system_skill
                 await asyncio.to_thread(system_skill.open_settings, page)
                 self.recorder.log_command(f"[ui] open Windows settings: {page}", source="ui")
+        elif isinstance(t, str) and t.startswith("ws_"):
+            await self.dev.handle(msg, ws)                      # developer workspaces (v1.5.0)
         elif t == "ping":
             await self.manager.send(ws, {"type": "pong"})
 
@@ -888,6 +895,7 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
     @asynccontextmanager
     async def lifespan(app):
         srv._loop = asyncio.get_running_loop()
+        srv.dev.start(srv._loop)
         voice_task = None
         if start_voice and srv.config.get("voice", {}).get("enabled", True):
             voice_task = asyncio.create_task(start_voice_engine())
@@ -900,6 +908,7 @@ def create_app(server: Optional[JarvisServer] = None, start_voice: bool = True, 
         yield
         if srv.voice is not None:
             srv.voice.stop()
+        await asyncio.to_thread(srv.dev.stop)
         for task in (voice_task, warm_task, srv._voice_task):
             if task is not None and not task.done():
                 task.cancel()

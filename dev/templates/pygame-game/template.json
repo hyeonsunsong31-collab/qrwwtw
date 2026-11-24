@@ -1,0 +1,4 @@
+{
+ "description": "a desktop game in Python with pygame (window, keyboard, sprites, score)",
+ "kind": "game-desktop"
+}

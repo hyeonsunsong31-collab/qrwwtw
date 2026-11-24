@@ -1,0 +1,4 @@
+{
+ "description": "an AI chat app that answers with the local language model (Ollama) -- free, offline",
+ "kind": "web"
+}

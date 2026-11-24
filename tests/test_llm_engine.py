@@ -415,7 +415,7 @@ def test_server_status_carries_the_language_engine_report():
         for key in ("llm_state", "llm_problem", "llm_note", "llm_progress", "llm_host", "llm_version",
                     "llm_proxy_bypassed"):
             assert key in st, key
-        assert st["version"] == "1.4.4"
+        assert st["version"] == "1.5.0"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

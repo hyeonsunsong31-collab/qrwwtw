@@ -30,7 +30,7 @@ def _pg():
 
 
 # JARVIS's own windows: when you type a command into the HUD, the HUD has the keyboard focus,
-# so "type ...", "copy that" or "maximise this window" must act on the window UNDER it (v1.5.0)
+# so "type ...", "copy that" or "maximise this window" must act on the window UNDER it (v1.4.4)
 OWN_TITLES = {"jarvis", "jarvis wallpaper", "jarvis 3d"}
 
 

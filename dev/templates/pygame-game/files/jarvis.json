@@ -1,0 +1,8 @@
+{
+  "kind": "game-desktop",
+  "build": [
+    "python -m pip install -r requirements.txt"
+  ],
+  "run": "python main.py",
+  "product": "main.py"
+}

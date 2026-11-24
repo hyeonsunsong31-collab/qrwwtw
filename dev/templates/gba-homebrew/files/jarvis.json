@@ -1,0 +1,7 @@
+{
+  "kind": "gba",
+  "build": [
+    "make"
+  ],
+  "product": "game.gba"
+}

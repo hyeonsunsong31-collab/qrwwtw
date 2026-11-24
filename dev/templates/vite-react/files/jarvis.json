@@ -1,0 +1,9 @@
+{
+  "kind": "web",
+  "build": [
+    "npm install",
+    "npm run build"
+  ],
+  "run": "static",
+  "web_root": "dist"
+}

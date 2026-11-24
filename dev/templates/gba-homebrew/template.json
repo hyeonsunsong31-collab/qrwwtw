@@ -1,0 +1,4 @@
+{
+ "description": "a Game Boy Advance game in C (arm-none-eabi-gcc; runs in mGBA)",
+ "kind": "gba"
+}

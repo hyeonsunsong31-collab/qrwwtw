@@ -1,0 +1,11 @@
+{
+  "name": "{{SLUG}}",
+  "version": "1.0.0",
+  "private": true,
+  "bin": {
+    "{{SLUG}}": "index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

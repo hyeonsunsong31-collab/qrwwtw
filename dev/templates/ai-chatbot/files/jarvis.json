@@ -1,0 +1,4 @@
+{
+  "kind": "web",
+  "run": "python server.py"
+}

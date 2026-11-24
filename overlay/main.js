@@ -17,7 +17,7 @@
  * Also: single-instance lock, tray menu, Ctrl+Alt+J emergency wake, Ctrl+Alt+G gestures,
  * and the session hand-off (the renderer reads token + port through preload -> ipc).
  */
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, nativeImage, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -327,6 +327,43 @@ function quitJarvis() {
 }
 ipcMain.on('app:quit', quitJarvis);
 
+/* ------------------------------------------- developer workspaces (v1.5.0) ---- */
+// The files you send are chosen here; the Workspaces panel may open only what JARVIS itself made
+// (inside its data folder) and web links (http/https: a product's local, Wi-Fi or public link).
+const inData = (p) => {
+  try {
+    const real = fs.realpathSync(path.resolve(String(p || '')));
+    const root = fs.realpathSync(path.resolve(DATA));
+    return real === root || real.startsWith(root + path.sep);
+  } catch (e) { return false; }
+};
+ipcMain.handle('dialog:pick-files', async () => {
+  if (!win || win.isDestroyed()) return [];
+  win.setIgnoreMouseEvents(false);
+  try {
+    const r = await dialog.showOpenDialog(win, { title: 'Files for JARVIS', properties: ['openFile', 'multiSelections'] });
+    return r.canceled ? [] : r.filePaths;
+  } finally {
+    if (win && !win.isDestroyed() && !win.isFullScreen()) win.setIgnoreMouseEvents(clickThrough, { forward: true });
+  }
+});
+ipcMain.handle('shell:open-path', async (_e, p) => {
+  if (!inData(p)) { log('refused to open a path outside the JARVIS data folder'); return 'refused'; }
+  return shell.openPath(path.resolve(p));
+});
+ipcMain.handle('shell:show-in-folder', async (_e, p) => {
+  if (!inData(p)) { log('refused to show a path outside the JARVIS data folder'); return 'refused'; }
+  shell.showItemInFolder(path.resolve(p));
+  return '';
+});
+ipcMain.handle('shell:open-external', async (_e, url) => {
+  let u;
+  try { u = new URL(String(url || '')); } catch (e) { return 'refused'; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'refused';
+  await shell.openExternal(u.toString());
+  return '';
+});
+
 /* Restart the overlay only (the supervisor starts it again; standalone it relaunches itself). */
 function restartOverlay() {
   if (process.env.JARVIS_SUPERVISED === '1') return app.exit(1);
@@ -386,6 +423,8 @@ app.whenReady().then(() => {
   createHud();
   try { buildTray(); } catch (e) { log('tray icon could not be created: ' + e.message); }
   if (!globalShortcut.register('Control+Alt+J', wake)) log('hotkey Ctrl+Alt+J is taken by another program');
+  if (!globalShortcut.register('Control+Alt+W', () => win && win.webContents.send('app:toggle-workspaces')))
+    log('hotkey Ctrl+Alt+W is taken by another program');
   if (!globalShortcut.register('Control+Alt+G', () => win && win.webContents.send('app:toggle-gesture')))
     log('hotkey Ctrl+Alt+G is taken by another program');
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createHud(); });

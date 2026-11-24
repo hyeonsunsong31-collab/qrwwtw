@@ -1,11 +1,12 @@
-# 아키텍처 (v1.4.4)
+# 아키텍처 (v1.5.0)
 
 ## 구성 요소
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Electron 오버레이 (overlay/)                                            │
 │  HUD 창(투명·항상 위·클릭 통과): WAKE 리액터 · 상태 링 · 채팅(스트리밍) ·      │
-│   마이크 음소거 2종 · 기능 독(24) · 설정 패널 · 권한 홀로그램 · 3D 공간       │
+│   마이크 음소거 2종 · 기능 독(25) · 설정 패널 · 권한 홀로그램 · 3D 공간 ·     │
+│   Workspaces 패널(v1.5.0: 슬롯 · 요청 · 체크리스트 · 산출물/링크 · 📎 첨부)      │
 │   시작 배너("J.A.R.V.I.S ONLINE") · 상태 파일(data/overlay.json) · 실패 로그     │
 │  배경화면 창: 3D 장면을 바탕화면 아이콘 뒤(WorkerW)에 렌더 — HUD는 위에 유지     │
 │  preload 브리지: 세션(토큰+포트) · 준비 신호 · 창 제어 · 단축키/트레이 이벤트   │
@@ -16,6 +17,8 @@
 │  Orchestrator ─ NLU ─ ControlLayer(신경 코어 + 동기 코어 + 자기 코어) ─ Skills /   │
 │  ResilientLLM(스트리밍) · Recorder · Permissions · Settings · replies_ko ·       │
 │  VoiceEngine(같은 프로세스, 모델은 백그라운드 로딩)                            │
+│  DevService(v1.5.0, dev/): 워크스페이스 · 스케줄러(작업 1개씩) · 코딩 루프 ·     │
+│   검증기(브라우저 포함) · 기록(Git) · 변환 · 링크(로컬/와이파이/공개 터널)        │
 └────────────────────────────────────────────────────────────────────────┘
  supervisor(boot/jarvis_service.py): 단일 인스턴스(뮤텍스) · 남은 프로세스 정리 · 백엔드/오버레이를
  직접 실행·재시작 · 출력은 data/logs/*.log · /health 감시 · 화면 표시부 런타임 자가 복구 ·
@@ -93,14 +96,35 @@ START_JARVIS.bat ─► boot/launcher.py
 ## 커맨드 버스 메시지
 - **클라이언트 → 서버:** `command` · `wake` · `listen`(누르고 말하기) · `interrupt` · `feedback` · `permission_response` ·
   `ui`(`ai_listen` 등) · `ui_state`(v1.4.4: 화면 상태, 예 `{space3d: true}`) · `neural_points` · `space3d_save` · `space3d_load` ·
-  `space3d_export` · `get_settings` · `set_settings` · `get_history` · `ping`
+  `space3d_export` · `get_settings` · `set_settings` · `get_history` · `ping` ·
+  v1.5.0 개발자: `ws_list` · `ws_get` · `ws_create` · `ws_select` · `ws_rename` · `ws_delete` · `ws_request`(글 + 첨부 경로) ·
+  `ws_pause` · `ws_resume` · `ws_stop` · `ws_undo` · `ws_share`(lan/public/stop)
 - **서버 → 클라이언트:** `hello`(설정 + 상태 + 자기 모델 요약) · `status`(음성 엔진 준비 등 상태 변화) ·
   `state`(idle/listening/capture/thinking/speaking/muted) · `transcript` ·
   `transcript_delta` · `say` · `stop_tts` · `wake_response` · `options` · `ui` · `permission_request` · `permission_resolved`(v1.4.4) · `timer_due`(v1.4.4) · `listen_unavailable` ·
   `neural_points` · `space3d_project` · `space3d_saved` · `space3d_exported` · `settings` · `settings_result` · `history` ·
-  `control` · `error` · `pong`
+  `control` · `error` · `pong` · v1.5.0 개발자: `ws_state`(슬롯 목록·바쁜 작업·모델 다운로드) · `ws_detail` · `ws_created` ·
+  `ws_queued` · `ws_undone` · `ws_links` · `ws_error` · `dev_progress`(단계·통과한 기준·스크린샷) · `dev_product`(파일·링크)
 - `ui` 동작에 `announce`(배너 표시) 추가, `control`에 `self`(자기 모델 요약) 추가.
 - HTTP: `/health`(공개) · `/status` `/neural/points` `/history` · `POST /announce`(토큰 필요).
+
+## 개발 워크스페이스 (v1.5.0) — `dev/`
+| 모듈 | 역할 |
+|---|---|
+| `workspaces.py` | 슬롯(`data/workspaces/<id>/`: input · project · output · logs), 쌓인 요청, 재시작 후 복구 |
+| `scheduler.py` | 한 번에 하나, 오래된 요청부터, 슬롯 안에서는 준 순서대로; 일시정지·계속·중지 |
+| `agent.py` | 코딩 루프: 입력 풀기 → 계획(수용 기준, 막연한 기준 제거) → 검사관의 검사 → 템플릿 → 단계(텍스트 지시문 또는 도구 호출) → 검증 → 실패 대응(지침·온도·처음부터 다시·기준 시점으로 되돌리기·감사) → 검토 → 산출물 |
+| `examiner.py` | 요청에서 검사 작성(코드 전), 깨진 검사 재작성, 감사(검사 vs 프로그램), 한 동작씩 다시 계산하는 숫자 투표, 증명이 있어야 인정되는 검토 |
+| `verify.py` | 완료의 정의: 설정·문법(JS는 node로 줄 번호)·자리표시자·참조·#id 대조·빌드·테스트(+약화 감지)·실행·브라우저 검사·숫자 비교·화면 증거 |
+| `protocol.py` | 지시문(FILE/EDIT/RUN/…/DONE) 파서(닫히지 않은 블록은 다음 지시문에서 끝남)와 도구 정의 |
+| `tools.py` · `procs.py` | 워크스페이스 범위 샌드박스(밖의 경로·설치·위험 명령은 확인), 프로젝트 .venv, 프로세스 트리 종료 |
+| `history.py` | 요청마다 Git 커밋(없으면 zip 스냅숏), 되돌리기, 기준 시점으로 초기화 |
+| `files.py` · `convert.py` | 형식 판별, PE·PyInstaller·asar·GBA·IPS/BPS·타일, 변환(없는 도구는 묻고 설치 후 재시도), → 실행 파일 |
+| `serve.py` · `models.py` · `toolchains.py` · `service.py` | 링크(정적 서버·LAN·cloudflared), 메모리에 맞는 코딩 모델 선택, 도구 탐지·설치, 서버 연결(이벤트·권한 질문·전달·말하기) |
+
+흐름: 말/입력/HUD → `dev_request`·`dev_convert`(NLU 또는 대화 모델의 도구 호출) 또는 `ws_request` → `DevService.request` → 스케줄러 →
+작업 스레드의 `DevAgent.run()` → `dev_progress` 방송 → 완료 시 Git 커밋 → `_deliver`(링크 시작·기록기 등록·`dev_product`·말하기).
+권한 질문은 작업 스레드에서 서버의 권한 관문으로 넘어가 다른 질문과 똑같이 말·입력·버튼으로 답합니다.
 
 ## 신경 코어 (요구 1) — `core/`
 `synaptic_perceptron.py`(상태를 가진 시냅스) → `brain_mesh.py`(3D 희소 메시, 6개 모듈, 시상 게이팅, NumPy) →

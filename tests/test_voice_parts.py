@@ -445,7 +445,7 @@ def test_server_explains_voice_problems_once_and_unheard_commands():
             await srv.listen(ws=object())
             assert out and out[0]["type"] == "listen_unavailable" and "starting up" in out[0]["reason"]
             st = srv.status()
-            assert "voice_detail" in st and "voice_tts" in st and st["version"] == "1.4.4"
+            assert "voice_detail" in st and "voice_tts" in st and st["version"] == "1.5.0"
 
         asyncio.run(run())
     finally:

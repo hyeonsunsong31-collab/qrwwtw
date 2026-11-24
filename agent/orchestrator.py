@@ -54,7 +54,7 @@ _CLAUSE = re.compile(r"[,;:]\s+|\s[-–—]\s+")
 
 # conversation context for the language model: trimmed in large steps so the kept part is
 # an unchanged prefix (cached by the model) for several turns in a row
-# (an action turn takes 4 messages since v1.5.0: request, tool call, tool result, reply -- the
+# (an action turn takes 4 messages since v1.4.4: request, tool call, tool result, reply -- the
 # character budget is what bounds the size)
 HISTORY_MAX_MESSAGES = 24
 HISTORY_MAX_CHARS = 6000
@@ -602,7 +602,7 @@ class Orchestrator:
         return f"{text}\n\n{note}" if note else text
 
     async def _do_chat_tools(self, text, lang, control, rid) -> Tuple[str, str]:
-        """Native tool calling: the model calls skills directly (v1.5.0)."""
+        """Native tool calling: the model calls skills directly (v1.4.4)."""
         system = self.system_prompt(lang)
         user_msg = self._user_msg(text, control, lang)
         history = self._history("tools")

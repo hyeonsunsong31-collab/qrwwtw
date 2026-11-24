@@ -82,7 +82,7 @@ def _rules():
             r"(너의?|네|당신의?|자비스의?)\s*(목적|목표|사명|지침)",
             r"(뭘|무엇을|뭐를)\s*(배웠|학습했|기억하)", r"나에\s*대해\s*(뭘|무엇을|뭐를)?\s*(알고|기억)",
         ]),
-        # ---------------- clock: time, timers, reminders (v1.5.0) ----------------
+        # ---------------- clock: time, timers, reminders (v1.4.4) ----------------
         ("set_timer", [
             r"\bremind me\b(\s+to)?\s+(?P<what>.+?)\s+(in|after)\s+(?P<duration>(an?|\d+|one|two|three|four|five|ten|fifteen|twenty|thirty|half an?)\b.*)$",
             r"\bremind me\b\s+(in|after)\s+(?P<duration>.+?)\s+(to|that)\s+(?P<what>.+)$",
@@ -124,7 +124,7 @@ def _rules():
         ]),
         # ---------------- 3D project space (requirements 5, 17, 18) ----------------
         # Closing comes FIRST: "close the 3D space" also mentions "3D space", and used to be
-        # read as "open the 3D space" (v1.5.0 fix). Speech recognition writes 3D, 3-D, 3 D or
+        # read as "open the 3D space" (v1.4.4 fix). Speech recognition writes 3D, 3-D, 3 D or
         # "three D". Commands about objects, gestures, the neural view or the wallpaper inside
         # the 3D space go to their own intents. ("workspace" now means a developer workspace.)
         ("close_space3d", [
@@ -270,7 +270,7 @@ def _rules():
                       r"\b(open|change|go to)\b.*\bsettings?\b", r"(블루투스|와이파이|비행기\s*모드|야간\s*모드)\s*(?P<page_ko>켜|꺼|설정)", r"설정.*(열어|변경|바꿔|가)"]),
         ("empty_recycle_bin", [r"\b(empty|clear|clean)\b\s+(out\s+)?(the\s+|my\s+)?(recycle bin|trash|bin)\b",
                                r"휴지통\s*(을|를)?\s*(비워|비우기|정리)"]),
-        # ---------------- folders (v1.5.0) ----------------
+        # ---------------- folders (v1.4.4) ----------------
         ("make_folder", [
             r"^(?!.*\b(and|then)\s+(then\s+)?(write|type|put|save|create|make|add|copy|move|open)\b)"
             r".*\b(make|create|add)\b\s+(a\s+)?(new\s+)?(folder|directory)\b(\s+(on|in|inside|under)\s+(my\s+|the\s+)?(?P<where>desktop|documents|downloads|pictures|music|videos|home( folder)?))?(\s+(called|named))?\s+(?P<name>[\w .,'()-]+?)(\s+(on|in)\s+(my\s+|the\s+)?(?P<where2>desktop|documents|downloads|pictures|music|videos))?$",
@@ -285,6 +285,48 @@ def _rules():
         ]),
         ("open_app", [r"^(open|launch|start|show)\s+(the\s+|my\s+)?(?P<app>file explorer|windows explorer|explorer|file manager)$",
                       r"(?P<app_ko>파일\s*탐색기|탐색기)\s*(을|를)?\s*(열어|실행|켜)"]),
+        # ---------------- developer workspaces (v1.5.0) ----------------
+        ("ws_new", [r"^(create|make|start|open|add|set up)\s+(a\s+)?(new\s+)(developer\s+|dev\s+|coding\s+)?(workspace|session slot|project slot|slot)(\s+(called|named|for))?\s*(?P<name>.*)$",
+                    r"^(start|create|make|begin|set up)\s+(a\s+)?new\s+(coding\s+|dev\s+|developer\s+|software\s+|programming\s+)?project(\s+(called|named|for))?\s*(?P<name>.*)$",
+                    r"^(create|make|add|set up)\s+(a\s+)?(developer\s+|dev\s+|coding\s+)?(workspace|session slot)(\s+(called|named|for))?\s*(?P<name>.*)$",
+                    r"^new\s+(workspace|session slot|project)(\s+(called|named|for))?\s*(?P<name>.*)$",
+                    r"^(새\s*)?(워크스페이스|작업\s*공간|세션\s*슬롯)\s*(?P<name>.*?)\s*(을|를)?\s*(만들어|생성|추가)\s*(줘|해\s*줘)?$",
+                    r"^(?P<name>.+?)\s*(이라는|라는)\s*(새\s*)?(워크스페이스|작업\s*공간)\s*(만들어|생성)"]),
+        ("ws_switch", [r"^(switch|go|change|move)\s+(back\s+)?to\s+(the\s+)?(workspace|project|slot)\s+(?P<name>.+)$",
+                       r"^(open|select|use|pick)\s+(the\s+)?(workspace|project slot|slot)\s+(?P<name>.+)$",
+                       r"^(?P<name>.+?)\s*(워크스페이스|작업\s*공간)\s*(으로|로)\s*(전환|바꿔|이동)"]),
+        ("open_workspaces", [r"^(show|open)\s+(me\s+)?(my\s+|the\s+)?(workspaces|workspace panel|developer|dev panel)$",
+                             r"^(워크스페이스|작업\s*공간)\s*(목록|패널)?\s*(보여|열어)\s*(줘)?$"]),
+        ("ws_status", [r"\b(workspace|build|coding|dev|developer|project)\b.*\b(status|progress)\b",
+                       r"\bhow('?s| is)\s+(the|my)\s+(build|project|app|game|website|site|coding|program|work)\s+(going|coming along|doing)\b",
+                       r"\bwhat are you (building|working on|coding|making)\b",
+                       r"(작업|빌드|개발|코딩|프로젝트)\s*(상황|진행|어디까지|상태)"]),
+        ("ws_share", [r"\b(?P<mode_stop>stop|end|turn off)\s+sharing\b",
+                      r"\bshare\b.*\b(?P<mode_lan>network|wi-?fi|lan|local network|phone|my devices)\b",
+                      r"\b(share|publish)\b.*\b(?P<mode_public>publicly|public|online|internet|everyone|the world|a link)\b",
+                      r"\b(give|get|send|make)\s+(me\s+)?(a\s+)?(?P<mode_public2>public|shareable|sharing)\s+link\b",
+                      r"(?P<mode_stop_ko>공유)\s*(중지|그만|끝)", r"(와이파이|네트워크|같은\s*망).*(?P<mode_lan_ko>공유)",
+                      r"(공개|인터넷|외부).*(?P<mode_public_ko>공유|링크)"]),
+        ("ws_pause", [r"^(pause|hold)\s+(the\s+)?(build|coding|work|job|project|developer|workspace)$",
+                      r"(작업|빌드|코딩)\s*(일시\s*정지|멈춰|잠깐\s*멈춰)"]),
+        ("ws_resume", [r"^(resume|continue|carry on( with)?)\s+(the\s+)?(build|coding|work|job|project)$", r"^(carry on|keep going|keep coding)$",
+                       r"(작업|빌드|코딩)\s*(계속|다시\s*시작|이어서)"]),
+        ("ws_stop", [r"^(stop|cancel|abort|quit)\s+(the\s+)?(build|coding|job|developer|work on it|working on it)$",
+                     r"^stop (coding|building)$", r"(작업|빌드|코딩)\s*(중지|취소|그만)"]),
+        ("ws_undo", [r"\b(undo|revert|roll back)\b\s+(the\s+)?(last\s+)?(change|request|adjustment|edit|update)s?\b",
+                     r"(마지막\s*)?(변경|수정|요청)\s*(을|를)?\s*(되돌려|취소)"]),
+        ("dev_convert", [r"^(convert|change|turn|transform|export|save)\s+(?P<src>.+?)\s+(in)?to\s+(an?\s+)?\.?(?P<fmt>exe|ico|png|jpe?g|webp|gif|bmp|tiff?|pdf|docx|html?|md|txt|json|ya?ml|csv|xlsx|ini|toml|xml|mp3|wav|ogg|flac|m4a|mp4|mkv|webm|mov|avi|zip|7z|tar\.gz|tgz|glb|gltf|obj|stl|woff2?|ttf|otf)(\s+(file|format|program|executable))?$",
+                         r"^(?P<src>.+?)\s*(을|를)?\s*\.?(?P<fmt>[a-z0-9]{2,5})\s*(파일)?\s*(로|으로)\s*(변환|바꿔|만들어)"]),
+        ("dev_request", [
+            r"^(build|make|create|develop|code|program|write|generate|design|implement|prototype|scaffold)\s+(me\s+|us\s+)?(a|an|the|my|some|another|new)?\s*"
+            r"(?P<text>.*\b(game|website|web ?site|web ?app|web ?page|landing page|homepage|app|application|program|tool|bot|chatbot|"
+            r"ai|a\.i\.|assistant|script|api|server|backend|extension|calculator|converter|todo|to-do|platformer|shooter|puzzle|rpg|"
+            r"dashboard|portfolio|blog|store|shop|editor|player|emulator|cli|utility|plugin|mod|simulator|visuali[sz]er|clone|"
+            r"tracker|planner|quiz|chat|widget|gui|interface|engine|level|rom|homebrew)\b.*)$",
+            r"^(modify|change|update|upgrade|improve|redesign|refactor|fix|rework|enhance|extend|polish|rewrite)\s+(?P<text>(it|the|this|my)\s+.*\b(game|website|site|page|app|application|program|tool|bot|code|project|product|ui|design|level|script|api)\b.*)$",
+            r"^(add|put|include|remove|replace)\s+(?P<text>.+\s+(to|in|into|from|on)\s+(the|my|this)\s+(game|website|site|page|app|application|program|tool|bot|project|product)\b.*)$",
+            r"(?P<text>.*(게임|웹사이트|홈페이지|사이트|웹\s*앱|앱|어플|프로그램|툴|봇|챗봇|인공지능|스크립트|계산기|서버|에뮬레이터).*)\s*(을|를)?\s*(만들어|개발해|제작해|코딩해|짜)\s*(줘|주세요|줄래)?$",
+            r"(?P<text>.*(게임|웹사이트|사이트|앱|어플|프로그램|코드|봇).*)\s*(수정해|바꿔|고쳐|개선해|업그레이드해|다시\s*디자인해|추가해)\s*(줘|주세요)?$"]),
         # ---------------- files (requirement 20) ----------------
         ("file_search", [r"\b(find|search|locate|look for)\b\s+(?P<query>.+?)\s+(file|files|document)s?$",
                          r"\b(find|search)\b.*\bfiles?\b.*\b(named|called|about)\b\s+(?P<query>.+)$",
@@ -339,6 +381,7 @@ _COMPILED = [(name, [re.compile(p, re.IGNORECASE) for p in pats]) for name, pats
 _STOPWORDS_APP = {"the", "my", "me", "please", "now", "a", "an", "up", "로", "을", "를", "좀"}
 _NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "voice_status", "mic_settings", "llm_status", "llm_install",
                    "time_now", "lock", "power", "open_folder", "empty_recycle_bin", "list_timers", "cancel_timer",
+                   "ws_status", "ws_pause", "ws_resume", "ws_stop", "ws_undo", "open_workspaces", "ws_new",
                    "shell_permission",
                    "stop_music", "open_space3d", "close_space3d",
                    "clone_object", "system_info", "sleep_assistant", "delete_object",
@@ -348,13 +391,17 @@ _NO_ARG_INTENTS = {"mute_mic", "unmute_mic", "voice_status", "mic_settings", "ll
                    "self_describe", "self_forget"}
 
 
+_GENERIC_APP = {"it", "this", "that", "them", "everything", "all", "the", "a", "an", "my", "window", "app",
+                "application", "program", "current", "one", "thing"}
+
+
 def _clean_app(name: str) -> str:
     name = name.strip().strip(".").strip()
     parts = [w for w in name.split() if w.lower() not in _STOPWORDS_APP]
     return " ".join(parts) if parts else name
 
 
-# ------------------------------------------------------------------ normalisation (v1.5.0)
+# ------------------------------------------------------------------ normalisation (v1.4.4)
 # Spoken commands arrive from speech recognition with punctuation and polite wrappers
 # ("Can you open Notepad?", "Jarvis, could you please turn it up for me."): the rules are
 # matched against the bare command first, then against the text as it was said.
@@ -415,7 +462,8 @@ def _postprocess(name: str, args: Dict[str, str], tl: str, t: str, pat) -> Optio
         args["app"] = _clean_app(app)
         if name == "open_app" and args["app"] in ("파일 탐색기", "탐색기", "file explorer", "windows explorer", "file manager"):
             args["app"] = "explorer"
-        if not args["app"] or args["app"] in ("it", "this", "that", "them", "everything", "all"):
+        # "close the app" / "close this window": no app is named (the words left were "the", "window")
+        if not args["app"] or all(w in _GENERIC_APP for w in args["app"].lower().split()):
             return None if name in ("open_app", "close_app") else args
     if "query" in args:
         q = args["query"].strip(" ?.")
@@ -497,6 +545,29 @@ def _postprocess(name: str, args: Dict[str, str], tl: str, t: str, pat) -> Optio
         f = {"download": "downloads", "document": "documents", "photos": "pictures", "trash": "recycle bin",
              "my computer": "this pc"}.get(f, f)
         return {"folder": f} if f else None
+    if name in ("dev_request",):
+        mt = pat.search(t)
+        txt = (mt.group(0) if mt else t).strip()
+        return {"text": txt}
+    if name == "dev_convert":
+        mt = pat.search(t)
+        src = (mt.group("src") if mt and mt.groupdict().get("src") else args.get("src", "")).strip()
+        src = re.sub(r"^(the|this|that|my)\s+", "", src, flags=re.IGNORECASE)
+        src = re.sub(r"\s+file$", "", src, flags=re.IGNORECASE) if not re.search(r"\.\w{1,5}$", src) else src
+        if re.fullmatch(r"[A-Za-z0-9]{2,5}", src or "") and src.lower() not in ("it", "this", "that"):
+            src = "it:" + src.lower()           # "this ini file": the last attached .ini file
+        return {"src": src or "it", "fmt": args.get("fmt", "").lower()}
+    if name == "ws_share":
+        keys = " ".join(args)
+        return {"mode": "stop" if "mode_stop" in keys else "lan" if "mode_lan" in keys else "public"}
+    if name in ("ws_new", "ws_switch"):
+        nm = re.sub(r"^(called|named|for)\s+", "", (args.get("name") or "").strip(" .'\""), flags=re.IGNORECASE)
+        mt = pat.search(t)
+        if mt and mt.groupdict().get("name"):
+            nm = re.sub(r"^(called|named|for)\s+", "", mt.group("name").strip(" .'\""), flags=re.IGNORECASE)
+        if name == "ws_switch" and not nm:
+            return None
+        return {"name": nm}
     if name == "settings":
         page = (args.get("page") or args.get("page2") or "").lower()
         ko = args.get("page_ko")
@@ -637,7 +708,7 @@ def strip_action_tags(text: str) -> str:
     return _ACTION_TAG.sub("", text or "").strip()
 
 
-# ------------------------------------------------------------------ yes / no (v1.5.0)
+# ------------------------------------------------------------------ yes / no (v1.4.4)
 # While JARVIS waits for permission ("Shall I close Spotify, sir?"), a spoken or typed answer
 # answers it -- it no longer arrives as a new command that cancels the waiting action.
 _YES = re.compile(

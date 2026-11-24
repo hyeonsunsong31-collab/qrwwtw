@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, NamedTuple, Optional
 
-from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck, llmcheck, shell, clock
+from . import files, apps, system, browser, media, music, devices, windows, selfcore, voicecheck, llmcheck, shell, clock, devskills
 
 
 class Skill(NamedTuple):
@@ -116,11 +116,24 @@ REGISTRY: Dict[str, Skill] = {
     "list_devices":   Skill(_call(devices.list_devices), "read_devices", "devices"),
     "set_brightness": Skill(_call(system.set_brightness), "media_control", "chat"),
 
-    # ---- clock (v1.5.0): the time, timers and reminders ----
+    # ---- clock (v1.4.4): the time, timers and reminders ----
     "time_now":       Skill(_call(clock.time_now), "read_system_info", "chat"),
     "set_timer":      Skill(_call(clock.set_timer), "jarvis_data", "chat"),
     "list_timers":    Skill(_call(clock.list_timers), "jarvis_data", "chat"),
     "cancel_timer":   Skill(_call(clock.cancel_timer), "jarvis_data", "chat"),
+
+    # ---- developer workspaces (v1.5.0): build / change programs until they pass their checks ----
+    "dev_request":    Skill(_call(devskills.dev_request), "dev_workspace", "chat"),
+    "dev_convert":    Skill(_call(devskills.dev_convert), "dev_workspace", "chat"),
+    "ws_new":         Skill(_call(devskills.ws_new), "jarvis_data", "chat"),
+    "ws_switch":      Skill(_call(devskills.ws_switch), "jarvis_data", "chat"),
+    "ws_status":      Skill(_call(devskills.ws_status), "read_system_info", "chat"),
+    "ws_share":       Skill(_call(devskills.ws_share), "network_share", "chat"),
+    "ws_pause":       Skill(_call(devskills.ws_pause), "jarvis_data", "chat"),
+    "ws_resume":      Skill(_call(devskills.ws_resume), "jarvis_data", "chat"),
+    "ws_stop":        Skill(_call(devskills.ws_stop), "jarvis_data", "chat"),
+    "ws_undo":        Skill(_call(devskills.ws_undo), "dev_workspace", "chat"),
+    "open_workspaces": Skill(_ui("workspaces", "Here are your workspaces, sir."), "read_system_info", "chat"),
 
     # ---- files ----
     "file_search":    Skill(_call(files.search_files), "read_files", "file_search"),

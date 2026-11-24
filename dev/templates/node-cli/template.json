@@ -1,0 +1,4 @@
+{
+ "description": "a command-line tool in Node.js, with node:test tests",
+ "kind": "cli"
+}

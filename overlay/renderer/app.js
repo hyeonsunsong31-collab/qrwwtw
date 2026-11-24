@@ -7,8 +7,9 @@ import { setLang, getLang, applyI18n, t } from "./i18n.js";
 import { initChat } from "./chat.js";
 import { initButtons } from "./buttons.js";
 import { initSettings } from "./settings.js";
+import { initWorkspaces, openProduct } from "./workspaces.js";
 
-let chat, buttons, settings, space3d = null;
+let chat, buttons, settings, workspaces, space3d = null;
 let cfg = {}, status = {}, backendHasVoice = false, wallpaperOn = false;
 let neuralTimer = null, projectRequested = false;
 
@@ -52,7 +53,7 @@ async function ensureSpace3d() {
 const space3dOpen = () => !document.getElementById("space3d-container").classList.contains("hidden");
 
 /* The brain is told what is on screen, so a bare "close it" / "exit" / "go back" (voice or
- * text) closes the 3D space while it is open (v1.5.0). Sent again after every reconnect. */
+ * text) closes the 3D space while it is open (v1.4.4). Sent again after every reconnect. */
 function reportUiState() {
   bus.send({ type: "ui_state", state: { space3d: space3dOpen() } });
   if (buttons) buttons.rerenderLabels();             // the dock's 3D button becomes "Close 3D"
@@ -147,6 +148,7 @@ async function handleUi(action, args = {}) {
     case "announce": announce(); break;
     case "open_space3d": await openSpace3d(); break;
     case "close_space3d": closeSpace3d(); break;
+    case "workspaces": if (workspaces) workspaces.open(); break;
     case "clone_object": if (await openSpace3d()) space3d.clone(); break;
     case "add_object": if (await openSpace3d()) space3d.addObject(args.shape); break;
     case "delete_object": if (await openSpace3d()) space3d.deleteSelected(); break;
@@ -224,7 +226,7 @@ const permToasts = new Map();          // request id -> toast (removed when answ
 function permissionToast(msg) {
   const el = document.createElement("div");
   el.className = "toast" + ((msg.risk || 0) >= 0.7 ? " danger" : "");
-  // the plain question ("Shall I close Spotify, sir?"), then the exact detail (v1.5.0)
+  // the plain question ("Shall I close Spotify, sir?"), then the exact detail (v1.4.4)
   const head = msg.question ? `<p class="perm-q"><b>${esc(msg.question)}</b></p>` :
                               `<p><b>${esc(msg.action || msg.category)}</b></p>`;
   el.innerHTML = `<h4>${esc(t("perm_title"))}</h4>${head}
@@ -445,6 +447,7 @@ function wirePreload() {
   window.jarvis.onToggleGesture(() => handleUi("toggle_gesture"));
   window.jarvis.onOpenSettings(() => settings.open());
   window.jarvis.onWallpaperChanged((on) => { wallpaperOn = !!on; });
+  if (window.jarvis.onToggleWorkspaces) window.jarvis.onToggleWorkspaces(() => workspaces && workspaces.toggle());
 }
 
 /* ------------------------------------------------------------------ init ---- */
@@ -463,6 +466,15 @@ function main() {
     space3dOpen,
   });
   settings = initSettings({ makeInteractive });
+  workspaces = initWorkspaces({
+    makeInteractive,
+    // a finished product: a card in the chat and a toast
+    onProduct: (m) => {
+      const p = m.product || {};
+      chat.addCard(p, { open_link: t("ws_open_link"), show_folder: t("ws_show_folder") }, openProduct);
+      toast(t("ws_ready_title"), (p.title || "") + (p.links && p.links.local ? " · " + p.links.local : ""), "", 9000);
+    },
+  });
   if (voiceBadge) voiceBadge.addEventListener("click", () => {
     chat.show();
     bus.command(getLang() === "ko" ? "마이크 확인해 줘" : "check the microphone", "text");

@@ -25,9 +25,23 @@
     "network_send": "ask",
     "install_software": "ask",
     "run_shell": "ask",
-    "run_shell_elevated": "deny"
+    "run_shell_elevated": "deny",
+    "dev_workspace": "allow",
+    "dev_outside": "ask",
+    "network_share": "ask"
   },
-  "always_ask_keywords": ["password", "credential", "secret", "token", "bank", "payment", "wallet", "format", "registry delete", "diskpart"],
+  "always_ask_keywords": [
+    "password",
+    "credential",
+    "secret",
+    "token",
+    "bank",
+    "payment",
+    "wallet",
+    "format",
+    "registry delete",
+    "diskpart"
+  ],
   "never_allowed": [
     "Actions that target computers other than this one",
     "Hiding JARVIS from the user or from the OS (no stealth / no anti-detection)",

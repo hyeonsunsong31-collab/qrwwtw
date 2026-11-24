@@ -2,7 +2,7 @@
  * overlay/preload.js -- the narrow bridge between the sandboxed renderer and the main process.
  * Exposes window.jarvis.* with only the specific channels the UI needs.
  */
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('jarvis', {
   platform: process.platform,
@@ -30,4 +30,12 @@ contextBridge.exposeInMainWorld('jarvis', {
   onOpenSettings: (cb) => ipcRenderer.on('app:open-settings', () => cb()),
   onWallpaperChanged: (cb) => ipcRenderer.on('wallpaper:changed', (_e, on) => cb(on)),
   onWallpaperState: (cb) => ipcRenderer.on('wallpaper:state', (_e, state) => cb(state)),
+
+  // developer workspaces (v1.5.0): choose files to send, open what JARVIS made
+  pickFiles: () => ipcRenderer.invoke('dialog:pick-files'),
+  getPathForFile: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch (e) { return ''; } },
+  openPath: (p) => ipcRenderer.invoke('shell:open-path', String(p || '')),
+  showInFolder: (p) => ipcRenderer.invoke('shell:show-in-folder', String(p || '')),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', String(url || '')),
+  onToggleWorkspaces: (cb) => ipcRenderer.on('app:toggle-workspaces', () => cb()),
 });

@@ -1,0 +1,4 @@
+{
+ "description": "a command-line program in Python, with pytest tests",
+ "kind": "cli"
+}

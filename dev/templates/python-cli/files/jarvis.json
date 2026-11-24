@@ -1,0 +1,8 @@
+{
+  "kind": "cli",
+  "build": [],
+  "test": [
+    "python -m pytest -q"
+  ],
+  "run": "python main.py"
+}
